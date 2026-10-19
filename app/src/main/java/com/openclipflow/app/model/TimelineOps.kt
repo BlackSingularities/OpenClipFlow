@@ -34,10 +34,13 @@ object TimelineOps {
 
     // ---------------------------------------------------------------- zgodność ścieżek
 
-    /** Czy materiał może leżeć na danej ścieżce. Wideo na ścieżce audio = sam dźwięk z nagrania. */
-    fun accepts(track: Track, asset: MediaAsset): Boolean = when (track.kind) {
-        TrackKind.VIDEO -> asset.kind != MediaKind.AUDIO
-        TrackKind.AUDIO -> asset.kind == MediaKind.AUDIO || (asset.kind == MediaKind.VIDEO && asset.hasAudio)
+    /**
+     * Czy materiał może leżeć na danej ścieżce. Ścieżki audio przyjmują wyłącznie dźwięk: pliki
+     * audio i dźwięk wyodrębniony z wideo ([Clip.audioOnly]); ścieżki wideo – obraz.
+     */
+    fun accepts(track: Track, asset: MediaAsset, clip: Clip? = null): Boolean = when (track.kind) {
+        TrackKind.VIDEO -> asset.kind != MediaKind.AUDIO && clip?.audioOnly != true
+        TrackKind.AUDIO -> asset.kind == MediaKind.AUDIO || (clip?.audioOnly == true && asset.hasAudio)
     }
 
     fun defaultDuration(asset: MediaAsset): Long =
@@ -122,8 +125,9 @@ object TimelineOps {
     }
 
     fun nextTrackName(p: Project, kind: TrackKind): String {
-        val base = if (kind == TrackKind.VIDEO) "Nakładka" else "Audio"
-        val n = p.tracks.count { it.kind == kind } + (if (kind == TrackKind.VIDEO) 0 else 1)
+        val base = if (kind == TrackKind.VIDEO) "Wideo" else "Dźwięk"
+        var n = p.tracks.count { it.kind == kind } + 1
+        while (p.tracks.any { it.name == "$base $n" }) n++
         return "$base $n"
     }
 
@@ -252,7 +256,7 @@ object TimelineOps {
         val c = p.clip(clipId) ?: return null
         val track = p.track(trackId) ?: return null
         val asset = p.asset(c.assetId) ?: return null
-        if (!accepts(track, asset) || track.locked) return null
+        if (!accepts(track, asset, c) || track.locked) return null
         val start = nearestFreeStart(p, track.id, newStartMs, c.durationMs, setOf(c.id)) ?: return null
         return replace(p, c.copy(startMs = start, trackId = track.id))
     }
@@ -335,6 +339,8 @@ object TimelineOps {
         val audio = c.copy(
             id = newId(),
             trackId = track.id,
+            audioOnly = true,
+            dissolveInMs = 0,
             transitionIn = Transition.NONE,
             transitionOut = Transition.NONE,
             filter = FilterPreset.NONE,
@@ -343,6 +349,31 @@ object TimelineOps {
         )
         val clips = base.clips.map { if (it.id == c.id) it.copy(muted = true) else it } + audio
         return base.copy(clips = clips) to audio
+    }
+
+    // ---------------------------------------------------------------- układy ekranu
+
+    /** Ustawia obszar kadru klipu (zeruje ręczne przesunięcie, żeby układ był równy). */
+    fun setRegion(p: Project, clipId: String, preset: LayoutPreset): Project? {
+        val c = p.clip(clipId) ?: return null
+        val t = c.transform.copy(region = preset.frame, offsetX = 0f, offsetY = 0f, scale = 1f, fill = preset != LayoutPreset.FULL || c.transform.fill)
+        return replace(p, c.copy(transform = t))
+    }
+
+    /**
+     * Ekran dzielony w miejscu głowicy: klip głównej ścieżki i klip najwyższej ścieżki wideo nad nią
+     * dostają układ [layout]. Zwraca null, gdy pod głowicą nie ma dwóch ujęć.
+     */
+    fun applySplitLayout(p: Project, atMs: Long, layout: SplitLayout): Project? {
+        val main = clipAt(p, p.mainTrack.id, atMs) ?: return null
+        val upper = p.videoTracks.drop(1).reversed().firstNotNullOfOrNull { t -> clipAt(p, t.id, atMs) } ?: return null
+        var out = setRegion(p, main.id, layout.main) ?: return null
+        out = setRegion(out, upper.id, layout.upper) ?: return null
+        if (layout == SplitLayout.RESET) {
+            out = replace(out, out.clip(main.id)!!.let { it.copy(transform = it.transform.copy(fill = false)) })
+            out = replace(out, out.clip(upper.id)!!.let { it.copy(transform = it.transform.copy(fill = false)) })
+        }
+        return out
     }
 
     // ---------------------------------------------------------------- napisy

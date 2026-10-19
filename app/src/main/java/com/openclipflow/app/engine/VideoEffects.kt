@@ -46,19 +46,40 @@ object VideoEffects {
     fun forClip(clip: Clip, timing: ClipTiming, outW: Int, outH: Int, overlay: Boolean): List<Effect> = buildList {
         filterMatrix(clip.filter, clip.filterStrength)?.let { m -> add(StaticRgb(m)) }
         addAll(colorEffects(clip.color))
-        // Dopasowanie do kadru sekwencji – wszystkie klipy wychodzą w tej samej rozdzielczości.
+        // Klip najpierw trafia do swojego obszaru kadru (cały kadr albo część – układy ekranu),
+        // tam działa ruch i kadrowanie, a na końcu obszar jest umieszczany w kadrze sekwencji.
+        val region = clip.transform.region
+        val rw = evenPx(outW * region.w)
+        val rh = evenPx(outH * region.h)
         add(
             Presentation.createForWidthAndHeight(
-                outW,
-                outH,
+                rw,
+                rh,
                 if (clip.transform.fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT,
             ),
         )
-        val needsMotion = !clip.transform.isIdentity ||
+        val needsMotion = !clip.transform.copy(region = com.openclipflow.app.model.Frame.FULL, fill = false).isIdentity ||
             clip.transitionIn == Transition.ZOOM || clip.transitionOut == Transition.ZOOM ||
             clip.transitionIn == Transition.SLIDE || clip.transitionOut == Transition.SLIDE
-        if (needsMotion) add(ClipMotion(clip, timing, outW.toFloat() / outH))
+        if (needsMotion) add(ClipMotion(clip, timing, rw.toFloat() / rh))
         if (!overlay && (clip.transitionIn.isFade() || clip.transitionOut.isFade())) add(FadeMatrix(clip, timing))
+        if (!region.isFull) add(RegionPlacement(region, outW, outH))
+    }
+
+    fun evenPx(v: Float): Int = (Math.round(v / 2f) * 2).coerceAtLeast(2)
+
+    /**
+     * Obrys klipu w kadrze sekwencji (współrzędne NDC, 4 narożniki) – do ramki zaznaczenia
+     * w podglądzie. Uwzględnia obszar układu, ruch i obrót.
+     */
+    fun outline(clip: Clip, localUs: Long, durationUs: Long, outAspect: Float): FloatArray {
+        val r = clip.transform.region
+        val regionAspect = outAspect * r.w / r.h
+        val m = ClipMotion.compute(clip, localUs, durationUs, regionAspect)
+        val pts = floatArrayOf(-1f, -1f, 1f, -1f, 1f, 1f, -1f, 1f)
+        m.mapPoints(pts)
+        RegionPlacement.matrix(r).mapPoints(pts)
+        return pts
     }
 
     private fun Transition.isFade() = this == Transition.FADE_BLACK || this == Transition.FADE_WHITE
@@ -156,6 +177,25 @@ object VideoEffects {
         if (inT && localUs < len) level = min(level, localUs.toFloat() / len)
         if (outT && localUs > durationUs - len) level = min(level, (durationUs - localUs).toFloat() / len)
         return ease(level)
+    }
+}
+
+/**
+ * Umieszcza klatkę obszaru (np. połowę ekranu) w pełnym kadrze sekwencji: wyjście ma rozmiar
+ * kadru, a obraz trafia w prostokąt [region]; reszta pozostaje przezroczysta.
+ */
+class RegionPlacement(private val region: com.openclipflow.app.model.Frame, private val outW: Int, private val outH: Int) : MatrixTransformation {
+    private val m = matrix(region)
+
+    override fun configure(inputWidth: Int, inputHeight: Int): androidx.media3.common.util.Size = androidx.media3.common.util.Size(outW, outH)
+
+    override fun getMatrix(presentationTimeUs: Long): Matrix = m
+
+    companion object {
+        fun matrix(r: com.openclipflow.app.model.Frame): Matrix = Matrix().apply {
+            postScale(r.w, r.h)
+            postTranslate((r.x + r.w / 2f) * 2f - 1f, 1f - (r.y + r.h / 2f) * 2f)
+        }
     }
 }
 

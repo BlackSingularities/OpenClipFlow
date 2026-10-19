@@ -27,6 +27,8 @@ import com.openclipflow.app.update.UpdateManager
 interface PlatformActions {
     fun pickMedia(target: ImportTarget, kinds: Array<String> = arrayOf("video/*", "image/*", "audio/*"))
     fun openProjectFile()
+    /** Prosi o dostęp do mikrofonu (lektor); [onGranted] – gdy jest. */
+    fun withMicrophone(onGranted: () -> Unit)
 }
 
 class MainActivity : ComponentActivity(), PlatformActions {
@@ -36,6 +38,11 @@ class MainActivity : ComponentActivity(), PlatformActions {
     private val pickProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importProjectFile) }
     private val saveExport = registerForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri -> uri?.let(vm::writeExportTo) }
     private val saveAudio = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mp4")) { uri -> uri?.let(vm::writeExportTo) }
+    private var micGranted: (() -> Unit)? = null
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) micGranted?.invoke() else vm.toast("Bez dostępu do mikrofonu nie da się nagrać lektora")
+        micGranted = null
+    }
     private val saveProject = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let(vm::writeProjectFile) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,6 +101,15 @@ class MainActivity : ComponentActivity(), PlatformActions {
     override fun pickMedia(target: ImportTarget, kinds: Array<String>) {
         vm.requestImport(target)
         runCatching { pickMedia.launch(kinds) }.onFailure { vm.toast("Brak aplikacji do wybierania plików") }
+    }
+
+    override fun withMicrophone(onGranted: () -> Unit) {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            onGranted()
+        } else {
+            micGranted = onGranted
+            micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
     }
 
     override fun openProjectFile() {

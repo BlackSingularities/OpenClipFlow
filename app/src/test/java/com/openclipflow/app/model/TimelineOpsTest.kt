@@ -57,7 +57,10 @@ class TimelineOpsTest {
         val audioTrack = p.track("a1")!!
         val videoTrack = p.track("v1")!!
         assertTrue(TimelineOps.accepts(audioTrack, song))
-        assertTrue(TimelineOps.accepts(audioTrack, video))
+        // Ścieżki audio przyjmują wyłącznie dźwięk: plik wideo – nie, wyodrębniony dźwięk – tak.
+        assertFalse(TimelineOps.accepts(audioTrack, video))
+        assertTrue(TimelineOps.accepts(audioTrack, video, Clip(assetId = "v", trackId = "a1", startMs = 0, durationMs = 1, audioOnly = true)))
+        assertFalse(TimelineOps.accepts(videoTrack, video, Clip(assetId = "v", trackId = "a1", startMs = 0, durationMs = 1, audioOnly = true)))
         assertFalse(TimelineOps.accepts(audioTrack, photo))
         assertFalse(TimelineOps.accepts(videoTrack, song))
         assertTrue(TimelineOps.accepts(videoTrack, photo))
@@ -120,8 +123,7 @@ class TimelineOpsTest {
         val b = Clip(id = "b", assetId = "w", trackId = "v1", startMs = 6_000, durationMs = 2_000)
         val p = TimelineOps.move(withMain(a, b), "b", 3_000)!!
         assertEquals(4_000L, p.clip("b")!!.startMs) // dosunięty za klip „a”
-        val toAudio = TimelineOps.move(withMain(a, b), "b", 0, "a1")!!
-        assertEquals("a1", toAudio.clip("b")!!.trackId) // wideo z dźwiękiem może leżeć na audio
+        assertNull(TimelineOps.move(withMain(a, b), "b", 0, "a1")) // wideo nie trafi na ścieżkę audio
         val photoClip = Clip(id = "c", assetId = "p", trackId = "v1", startMs = 9_000, durationMs = 1_000)
         assertNull(TimelineOps.move(withMain(a, photoClip), "c", 0, "a1"))
     }
@@ -156,7 +158,11 @@ class TimelineOpsTest {
         val a = Clip(id = "a", assetId = "v", trackId = "v1", startMs = 0, durationMs = 3_000, sourceInMs = 500, speed = 1.5f)
         val (p, audio) = TimelineOps.detachAudio(withMain(a), "a")!!
         assertTrue(p.clip("a")!!.muted)
+        assertTrue(audio.audioOnly)
         assertEquals("a1", audio.trackId)
+        // Wyodrębniony dźwięk można przenieść na inną ścieżkę audio, ale nie na wideo.
+        assertEquals("a2", TimelineOps.move(p, audio.id, 0, "a2")!!.clip(audio.id)!!.trackId)
+        assertNull(TimelineOps.move(p, audio.id, 20_000, "v2"))
         assertEquals(500L, audio.sourceInMs)
         assertEquals(1.5f, audio.speed)
         assertNull(TimelineOps.detachAudio(p, "a"))
@@ -215,6 +221,40 @@ class TimelineOpsTest {
         val one = TimelineOps.removeTrack(p, "a2")!!
         assertNull(TimelineOps.removeTrack(one, "a1"))
         assertNotNull(TimelineOps.removeTrack(p, "v2"))
+    }
+
+    @Test fun insertingVideoOnAudioTrackFallsBackToVideo() {
+        val (_, c) = TimelineOps.insertAsset(base(), video, 0, "a1")!!
+        assertEquals("v1", c.trackId)
+    }
+
+    @Test fun newTrackNamesAreUnique() {
+        val p = TimelineOps.addTrack(base(), TrackKind.VIDEO)
+        assertEquals("Wideo 3", p.tracks.last().name)
+        assertEquals("Dźwięk 3", TimelineOps.addTrack(p, TrackKind.AUDIO).tracks.last().name)
+    }
+
+    @Test fun splitLayoutSetsBothClipsUnderPlayhead() {
+        val a = Clip(id = "a", assetId = "v", trackId = "v1", startMs = 0, durationMs = 5_000)
+        val b = Clip(id = "b", assetId = "w", trackId = "v2", startMs = 1_000, durationMs = 3_000, transform = Transform(offsetX = 0.3f))
+        val p = TimelineOps.applySplitLayout(withMain(a, b), 2_000, SplitLayout.SIDE_BY_SIDE)!!
+        assertEquals(LayoutPreset.LEFT.frame, p.clip("a")!!.transform.region)
+        assertEquals(LayoutPreset.RIGHT.frame, p.clip("b")!!.transform.region)
+        assertTrue(p.clip("a")!!.transform.fill)
+        assertEquals(0f, p.clip("b")!!.transform.offsetX)
+        // Bez drugiego ujęcia pod głowicą układ nie ma sensu.
+        assertNull(TimelineOps.applySplitLayout(withMain(a, b), 4_500, SplitLayout.STACKED))
+        val reset = TimelineOps.applySplitLayout(p, 2_000, SplitLayout.RESET)!!
+        assertTrue(reset.clip("a")!!.transform.region.isFull)
+        assertFalse(reset.clip("a")!!.transform.fill)
+    }
+
+    @Test fun layoutPresetsStayInsideFrame() {
+        LayoutPreset.entries.forEach { lp ->
+            val f = lp.frame
+            assertTrue(lp.name, f.x >= 0f && f.y >= 0f && f.x + f.w <= 1.0001f && f.y + f.h <= 1.0001f)
+            assertEquals(lp, LayoutPreset.of(f))
+        }
     }
 
     @Test fun sequenceSettingsDimensions() {

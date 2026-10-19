@@ -73,6 +73,10 @@ import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material.icons.rounded.MusicOff
+import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.PauseCircle
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -143,7 +147,7 @@ fun EditorScreen(vm: EditorViewModel, platform: PlatformActions) {
             }
         }
         EditorPanels(vm, platform)
-        TrackDialogs(vm)
+        TrackDialogs(vm, platform)
     }
 }
 
@@ -281,8 +285,9 @@ private fun PreviewOverlay(vm: EditorViewModel) {
                                     pr,
                                     cur.copy(
                                         transform = tr.copy(
-                                            offsetX = (tr.offsetX + pan.x / w).coerceIn(-1.5f, 1.5f),
-                                            offsetY = (tr.offsetY + pan.y / h).coerceIn(-1.5f, 1.5f),
+                                            // Przesunięcie liczone względem obszaru układu (np. połowy ekranu).
+                                            offsetX = (tr.offsetX + pan.x / (w * tr.region.w)).coerceIn(-1.5f, 1.5f),
+                                            offsetY = (tr.offsetY + pan.y / (h * tr.region.h)).coerceIn(-1.5f, 1.5f),
                                             scale = (tr.scale * zoom).coerceIn(0.1f, 6f),
                                             rotation = ((tr.rotation + rot) % 360f),
                                         ),
@@ -308,9 +313,7 @@ private fun PreviewOverlay(vm: EditorViewModel) {
             drawRect(Color.White, Offset(r.left, r.top), Size(r.width(), r.height()), style = Stroke(1.5.dp.toPx(), pathEffect = dash))
         }
         v.selectedClip?.takeIf { it.startMs <= t && t < it.endMs && v.project.track(it.trackId)?.kind == TrackKind.VIDEO }?.let { c ->
-            val m = ClipMotion.compute(c, (t - c.startMs) * 1000, c.durationMs * 1000, size.width / size.height)
-            val pts = floatArrayOf(-1f, -1f, 1f, -1f, 1f, 1f, -1f, 1f)
-            m.mapPoints(pts)
+            val pts = com.openclipflow.app.engine.VideoEffects.outline(c, (t - c.startMs) * 1000, c.durationMs * 1000, size.width / size.height)
             val path = androidx.compose.ui.graphics.Path().apply {
                 for (i in 0 until 4) {
                     val x = (pts[i * 2] + 1f) / 2f * size.width
@@ -339,6 +342,23 @@ private fun TransportBar(vm: EditorViewModel, fullscreen: Boolean, onFullscreen:
         Modifier.fillMaxWidth().height(46.dp).background(Color.Black).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (vm.recording) {
+            // Nagrywanie lektora: czerwona pigułka z czasem, dotknięcie kończy nagranie.
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(50))
+                    .background(Palette.Record)
+                    .reactive("Zakończ nagrywanie") { vm.stopRecording() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Stop, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(TimeFormat.short(vm.recordElapsedMs).substringBeforeLast('.'), style = MonoDigits, color = Color.White, fontSize = 12.sp)
+            }
+            return@Row
+        }
         Column(Modifier.weight(1f)) {
             Text(TimeFormat.short(vm.playheadMs), style = MonoDigits, color = Color.White, fontSize = 13.sp)
             Text("/ " + TimeFormat.short(vm.project.durationMs), style = MonoDigits, color = Palette.TextDim, fontSize = 10.sp)
@@ -394,6 +414,10 @@ private fun tools(vm: EditorViewModel, platform: PlatformActions): List<Tool> {
                     add(Tool(Icons.Rounded.Crop, "Kadr", active = vm.panel == PanelKind.CLIP && vm.clipTab == ClipTab.TRANSFORM) { vm.openClipPanel(ClipTab.TRANSFORM) })
                     add(Tool(Icons.Rounded.Animation, "Przejścia", active = vm.panel == PanelKind.CLIP && vm.clipTab == ClipTab.TRANSITION) { vm.openClipPanel(ClipTab.TRANSITION) })
                 }
+                if (isVideoTrack) {
+                    add(Tool(Icons.Rounded.Dashboard, "Układ") { vm.openClipPanel(ClipTab.TRANSFORM) })
+                    add(Tool(Icons.Rounded.PauseCircle, "Stop-klatka") { vm.freezeFrame() })
+                }
                 if (isVideoTrack && asset?.kind == MediaKind.VIDEO && asset.hasAudio && !clip.muted) add(Tool(Icons.Rounded.MusicOff, "Odłącz audio") { vm.detachAudio() })
                 add(Tool(Icons.Rounded.ContentCopy, "Duplikuj") { vm.duplicateSelection() })
                 add(Tool(Icons.Rounded.FindReplace, "Podmień") {
@@ -414,7 +438,10 @@ private fun tools(vm: EditorViewModel, platform: PlatformActions): List<Tool> {
             Tool(Icons.Rounded.PhotoLibrary, "Biblioteka", active = vm.panel == PanelKind.MEDIA) { vm.panel = PanelKind.MEDIA },
             Tool(Icons.Rounded.TextFields, "Tekst") { vm.addTitle() },
             Tool(Icons.Rounded.AudioFile, "Muzyka") { platform.pickMedia(ImportTarget.TIMELINE, arrayOf("audio/*")) },
-            Tool(Icons.Rounded.PictureInPicture, "Nakładka") { platform.pickMedia(ImportTarget.OVERLAY, arrayOf("video/*", "image/*")) },
+            Tool(Icons.Rounded.PictureInPicture, "Wideo 2") { platform.pickMedia(ImportTarget.OVERLAY, arrayOf("video/*", "image/*")) },
+            Tool(Icons.Rounded.Dashboard, "Układ") { vm.layoutChooser = true },
+            Tool(Icons.Rounded.Mic, "Lektor", danger = vm.recording) { if (vm.recording) vm.stopRecording() else platform.withMicrophone { vm.startRecording() } },
+            Tool(Icons.Rounded.PauseCircle, "Stop-klatka") { vm.freezeFrame() },
             Tool(Icons.Rounded.CallSplit, "Podziel") { vm.splitTool() },
             Tool(Icons.Rounded.Layers, "Ścieżki", active = vm.panel == PanelKind.TRACKS) { vm.panel = PanelKind.TRACKS },
             Tool(Icons.Rounded.AspectRatio, "Format", active = vm.panel == PanelKind.PROJECT) { vm.panel = PanelKind.PROJECT },

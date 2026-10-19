@@ -4,7 +4,9 @@ Edytor wideo na Androida (10+) w Kotlinie i Jetpack Compose, z silnikiem **Media
 
 ## Możliwości
 
-- Wielościeżkowa oś czasu: główna ścieżka obrazu, nakładki (obraz w obrazie), dowolna liczba ścieżek audio i ścieżka napisów.
+- Wielościeżkowa oś czasu: dowolna liczba ścieżek wideo i audio (audio przyjmują tylko dźwięk) oraz ścieżka napisów.
+- Układy ekranu dla kilku ujęć naraz: obok siebie, jedno nad drugim, okienko, ćwiartki; tło kadru: kolor lub rozmyte wideo.
+- Nagrywanie lektora z mikrofonu i stop-klatka.
 - Przycinanie, rozcinanie, przesuwanie między ścieżkami, przyciąganie, usuwanie z przesunięciem, duplikowanie, znaczniki, cofnij/ponów.
 - Prędkość, głośność, wyciszanie, filtry, korekcja kolorów, rozmycie, kadr i obrót, Ken Burns, przejścia.
 - Przenikanie między ujęciami (montaż A/B z zapasem materiału) i cięcie pojedynczej ścieżki.

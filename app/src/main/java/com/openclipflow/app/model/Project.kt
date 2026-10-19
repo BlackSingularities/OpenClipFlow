@@ -82,6 +82,47 @@ data class ColorAdjust(
 @Serializable
 enum class KenBurns(val label: String) { NONE("Brak"), ZOOM_IN("Przybliżenie"), ZOOM_OUT("Oddalenie"), PAN_LEFT("Panorama ←"), PAN_RIGHT("Panorama →") }
 
+/** Prostokąt w kadrze sekwencji (ułamki 0..1 od lewego górnego rogu). */
+@Serializable
+data class Frame(val x: Float = 0f, val y: Float = 0f, val w: Float = 1f, val h: Float = 1f) {
+    val isFull: Boolean get() = x <= 0.0001f && y <= 0.0001f && w >= 0.9999f && h >= 0.9999f
+
+    companion object {
+        val FULL = Frame()
+    }
+}
+
+/** Gotowe układy ekranu dla kilku ścieżek wideo naraz. */
+enum class LayoutPreset(val label: String, val frame: Frame) {
+    FULL("Pełny kadr", Frame.FULL),
+    LEFT("Lewa połowa", Frame(0f, 0f, 0.5f, 1f)),
+    RIGHT("Prawa połowa", Frame(0.5f, 0f, 0.5f, 1f)),
+    TOP("Górna połowa", Frame(0f, 0f, 1f, 0.5f)),
+    BOTTOM("Dolna połowa", Frame(0f, 0.5f, 1f, 0.5f)),
+    Q_TL("Ćwiartka ↖", Frame(0f, 0f, 0.5f, 0.5f)),
+    Q_TR("Ćwiartka ↗", Frame(0.5f, 0f, 0.5f, 0.5f)),
+    Q_BL("Ćwiartka ↙", Frame(0f, 0.5f, 0.5f, 0.5f)),
+    Q_BR("Ćwiartka ↘", Frame(0.5f, 0.5f, 0.5f, 0.5f)),
+    PIP_TL("Okienko ↖", Frame(0.04f, 0.05f, 0.34f, 0.34f)),
+    PIP_TR("Okienko ↗", Frame(0.62f, 0.05f, 0.34f, 0.34f)),
+    PIP_BL("Okienko ↙", Frame(0.04f, 0.61f, 0.34f, 0.34f)),
+    PIP_BR("Okienko ↘", Frame(0.62f, 0.61f, 0.34f, 0.34f)),
+    ;
+
+    companion object {
+        fun of(f: Frame): LayoutPreset? = entries.firstOrNull { it.frame == f }
+    }
+}
+
+/** Ekran dzielony: układ dla dwóch ujęć naraz (główna ścieżka + ścieżka nad nią). */
+enum class SplitLayout(val label: String, val main: LayoutPreset, val upper: LayoutPreset) {
+    SIDE_BY_SIDE("Obok siebie", LayoutPreset.LEFT, LayoutPreset.RIGHT),
+    STACKED("Jeden nad drugim", LayoutPreset.TOP, LayoutPreset.BOTTOM),
+    PIP("Obraz w obrazie", LayoutPreset.FULL, LayoutPreset.PIP_BR),
+    PIP_TOP("Okienko u góry", LayoutPreset.FULL, LayoutPreset.PIP_TR),
+    RESET("Bez podziału", LayoutPreset.FULL, LayoutPreset.FULL),
+}
+
 @Serializable
 data class Transform(
     val scale: Float = 1f,
@@ -95,6 +136,8 @@ data class Transform(
     /** Wypełnij kadr (przytnij) zamiast zmieścić z pasami. */
     val fill: Boolean = false,
     val kenBurns: KenBurns = KenBurns.NONE,
+    /** Obszar kadru, w którym leży klip (układy: ekran dzielony, okienko). */
+    val region: Frame = Frame.FULL,
 ) {
     val isIdentity: Boolean get() = this == Transform()
 }
@@ -136,6 +179,8 @@ data class Clip(
     val transform: Transform = Transform(),
     /** Krycie warstwy (ścieżki nakładek). */
     val opacity: Float = 1f,
+    /** Sam dźwięk wyodrębniony z nagrania wideo (leży na ścieżce audio). */
+    val audioOnly: Boolean = false,
 ) {
     val endMs: Long get() = startMs + durationMs
     val sourceDurationMs: Long get() = (durationMs * speed).roundToLong()
@@ -193,7 +238,11 @@ enum class AspectRatio(val label: String, val w: Int, val h: Int) {
     CINEMA("21:9", 21, 9),
 }
 
-/** Parametry sekwencji: proporcje, rozdzielczość (krótszy bok), klatkaż i kolor tła. */
+/** Tło kadru tam, gdzie obraz go nie wypełnia (np. pionowe nagranie w poziomym filmie). */
+@Serializable
+enum class BackgroundMode(val label: String) { BLACK("Czarne"), COLOR("Kolor"), BLUR("Rozmyte wideo") }
+
+/** Parametry sekwencji: proporcje, rozdzielczość (krótszy bok), klatkaż i tło. */
 @Serializable
 data class SequenceSettings(
     val aspect: AspectRatio = AspectRatio.WIDE,
@@ -201,6 +250,7 @@ data class SequenceSettings(
     val fps: Int = 30,
     val background: Int = 0xFF000000.toInt(),
     val snapping: Boolean = true,
+    val backgroundMode: BackgroundMode = BackgroundMode.BLACK,
 ) {
     val width: Int get() = even(if (aspect.w >= aspect.h) shortSide * aspect.w / aspect.h else shortSide)
     val height: Int get() = even(if (aspect.w >= aspect.h) shortSide else shortSide * aspect.h / aspect.w)
@@ -244,9 +294,9 @@ data class Project(
         const val MAIN_TRACK = "v1"
 
         fun defaultTracks() = listOf(
-            Track(MAIN_TRACK, TrackKind.VIDEO, "Wideo"),
-            Track("v2", TrackKind.VIDEO, "Nakładka"),
-            Track("a1", TrackKind.AUDIO, "Audio"),
+            Track(MAIN_TRACK, TrackKind.VIDEO, "Wideo 1"),
+            Track("v2", TrackKind.VIDEO, "Wideo 2"),
+            Track("a1", TrackKind.AUDIO, "Dźwięk 1"),
             Track("a2", TrackKind.AUDIO, "Muzyka"),
         )
     }

@@ -381,11 +381,40 @@ private fun AdjustTab(vm: EditorViewModel, c: Clip) {
     if (!a.isIdentity) Group(null) { ActionRow(Icons.Rounded.Refresh, "Przywróć oryginał") { vm.updateClip(c.copy(color = com.openclipflow.app.model.ColorAdjust())) } }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TransformTab(vm: EditorViewModel, c: Clip, overlay: Boolean) {
     val t = c.transform
     fun set(n: Transform, live: Boolean = true) = vm.updateClip(c.copy(transform = n), live = live)
     Text("Przeciągaj, szczyp i obracaj obraz bezpośrednio w podglądzie.", color = Palette.TextDim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp))
+    Group("Układ w kadrze") {
+        val s = vm.project.settings
+        val aspect = s.width.toFloat() / s.height
+        val current = com.openclipflow.app.model.LayoutPreset.of(t.region)
+        Text(
+            "Gdzie leży to ujęcie. Dwie ścieżki wideo obok siebie: jedno ujęcie „Lewa połowa”, drugie „Prawa połowa” (albo narzędzie Układ).",
+            color = Palette.TextDim,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+        )
+        FlowRow(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.openclipflow.app.model.LayoutPreset.entries.forEach { lp ->
+                val sel = lp == current
+                Column(
+                    Modifier
+                        .width(72.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (sel) Color.White else Color.White.copy(alpha = 0.06f))
+                        .reactive(lp.label) { vm.setClipLayout(c.id, lp) }
+                        .padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    LayoutThumb(listOf(lp.frame), aspect, selected = sel, modifier = Modifier.height(34.dp))
+                    Text(lp.label, color = if (sel) Palette.Ink else Color.White, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
+        }
+    }
     Group("Kadr") {
         CompactChoice(Icons.Rounded.AspectRatio, "Dopasowanie", listOf(false, true), t.fill, { if (it) "Wypełnij kadr (przytnij)" else "Zmieść całość (pasy)" }, { if (it) "Wypełnij" else "Zmieść" }) { set(t.copy(fill = it), live = false) }
         SliderRow(Icons.Rounded.ZoomIn, "Skala", t.scale, 0.1f..4f, ::pct, default = 1f, onChange = { set(t.copy(scale = it)) }, onCommit = { vm.commitLive() })
@@ -399,18 +428,8 @@ private fun TransformTab(vm: EditorViewModel, c: Clip, overlay: Boolean) {
         }
     }
     if (overlay) {
-        Group("Nakładka") {
+        Group("Warstwa") {
             SliderRow(Icons.Rounded.Opacity, "Krycie", c.opacity, 0f..1f, ::pct, default = 1f, onChange = { vm.updateClip(c.copy(opacity = it), live = true) }, onCommit = { vm.commitLive() })
-            Chips(Icons.Rounded.PictureInPicture, "Obraz w obrazie", listOf("Pełny", "↖", "↗", "↙", "↘"), "", { it }) { pos ->
-                val n = when (pos) {
-                    "↖" -> t.copy(scale = 0.4f, offsetX = -0.27f, offsetY = -0.27f)
-                    "↗" -> t.copy(scale = 0.4f, offsetX = 0.27f, offsetY = -0.27f)
-                    "↙" -> t.copy(scale = 0.4f, offsetX = -0.27f, offsetY = 0.27f)
-                    "↘" -> t.copy(scale = 0.4f, offsetX = 0.27f, offsetY = 0.27f)
-                    else -> t.copy(scale = 1f, offsetX = 0f, offsetY = 0f)
-                }
-                set(n, live = false)
-            }
         }
     }
     Group("Ruch (Ken Burns)") {
@@ -542,6 +561,19 @@ private fun ProjectPanel(vm: EditorViewModel, platform: PlatformActions, onClose
     var name by remember(p.id) { mutableStateOf(p.name) }
     Panel("Projekt", onClose) {
         DarkField(name, { name = it; if (it.isNotBlank()) vm.editLive { pr -> pr.copy(name = it.trim()) } }, "Nazwa projektu")
+        Group("Tło kadru") {
+            Chips(Icons.Rounded.Palette, "Tam, gdzie obraz nie wypełnia kadru", com.openclipflow.app.model.BackgroundMode.entries, s.backgroundMode, { it.label }) { vm.setBackground(it) }
+            if (s.backgroundMode == com.openclipflow.app.model.BackgroundMode.COLOR) {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (Palette.TitleColors + listOf(0xFF263238.toInt(), 0xFF3E2723.toInt(), 0xFF1B5E20.toInt(), 0xFF0D47A1.toInt())).forEach { col ->
+                        ColorDot(col, s.background == col) { vm.setBackground(com.openclipflow.app.model.BackgroundMode.COLOR, col) }
+                    }
+                }
+            }
+            if (s.backgroundMode == com.openclipflow.app.model.BackgroundMode.BLUR) {
+                Text("Rozmyta, przyciemniona kopia ujęcia wypełnia pasy – np. pionowe nagranie w filmie 16:9.", color = Palette.TextDim, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+            }
+        }
         Group("Format kadru") {
             Box(Modifier.padding(8.dp)) { AspectPicker(s.aspect) { vm.updateSequence(s.copy(aspect = it)) } }
             Chips(Icons.Rounded.HighQuality, "Rozdzielczość", listOf(720, 1080, 1440, 2160), s.shortSide, { if (it == 2160) "4K" else "${it}p" }) { vm.updateSequence(s.copy(shortSide = it)) }
@@ -636,6 +668,7 @@ private fun ExportPanel(vm: EditorViewModel, onClose: () -> Unit) {
 private fun TracksPanel(vm: EditorViewModel, onClose: () -> Unit) {
     val p = vm.project
     Panel("Ścieżki", onClose) {
+        Text("Ścieżki wideo leżą jedna nad drugą – wyższa przykrywa niższą. Żeby widzieć dwa ujęcia naraz, użyj narzędzia Układ (obok siebie, jedno nad drugim, okienko). Ścieżki audio przyjmują tylko dźwięk.", color = Palette.TextDim, fontSize = 11.sp)
         Group("Obraz (od góry)") {
             (p.videoTracks.drop(1).reversed() + p.mainTrack).forEach { t -> TrackRow(vm, t, main = t.id == p.mainTrack.id) }
         }
@@ -643,10 +676,9 @@ private fun TracksPanel(vm: EditorViewModel, onClose: () -> Unit) {
             p.audioTracks.forEach { t -> TrackRow(vm, t, main = false) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PillButton("Nakładka", primary = false, icon = Icons.Rounded.AddCircle) { vm.addTrack(TrackKind.VIDEO) }
+            PillButton("Ścieżka wideo", primary = false, icon = Icons.Rounded.AddCircle) { vm.addTrack(TrackKind.VIDEO) }
             PillButton("Ścieżka audio", primary = false, icon = Icons.Rounded.AddCircle) { vm.addTrack(TrackKind.AUDIO) }
         }
-        Text("Nakładki leżą nad główną ścieżką: obraz w obrazie, logo, przebitki. Ich położenie i krycie ustawisz w zakładce Kadr klipu.", color = Palette.TextDim, fontSize = 11.sp)
     }
 }
 

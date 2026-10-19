@@ -20,6 +20,9 @@ import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
+import android.content.Context
+import androidx.media3.effect.Presentation
+import com.openclipflow.app.model.BackgroundMode
 import com.openclipflow.app.model.Clip
 import com.openclipflow.app.model.Dissolves
 import com.openclipflow.app.model.MediaAsset
@@ -56,6 +59,8 @@ object CompositionFactory {
         /** Górna warstwa A/B głównej ścieżki – krycie wg okien przenikania. */
         data class MainTop(val items: List<Dissolves.Item>) : Input
         data object MainBase : Input
+        /** Tło pod wszystkim (kolor albo rozmyta kopia głównej ścieżki). */
+        data object Background : Input
     }
 
     /**
@@ -63,6 +68,7 @@ object CompositionFactory {
      * i przenikania) – awaryjny podgląd na urządzeniach bez jego obsługi.
      */
     fun build(
+        context: Context,
         project: Project,
         seq: SequenceSettings,
         multiLayer: Boolean = true,
@@ -101,6 +107,12 @@ object CompositionFactory {
                 sequences += videoSequence(project, main, segs, w, h, seq.fps, overlay = false)
                 inputs += Input.MainBase
             }
+            if (multiLayer && project.settings.backgroundMode != BackgroundMode.BLACK) {
+                backgroundSequence(context, project, total, w, h, seq.fps)?.let {
+                    sequences += it
+                    inputs += Input.Background
+                }
+            }
         }
 
         project.audioTracks.filter { !it.muted }.forEach { t ->
@@ -132,6 +144,62 @@ object CompositionFactory {
         }
         return Built(builder.build(), total, videoCount)
     }
+
+    /**
+     * Tło: jednolity kolor (obraz 16×16 rozciągnięty na kadr) albo rozmyta, przyciemniona kopia
+     * głównej ścieżki wypełniająca cały kadr. Rozmycie liczone w małej rozdzielczości – tanio.
+     */
+    private fun backgroundSequence(context: Context, p: Project, totalMs: Long, w: Int, h: Int, fps: Int): EditedMediaItemSequence? {
+        val b = EditedMediaItemSequence.Builder(ImmutableSet.of(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO))
+        when (p.settings.backgroundMode) {
+            BackgroundMode.BLACK -> return null
+            BackgroundMode.COLOR -> {
+                val file = colorImage(context, p.settings.background) ?: return null
+                val item = MediaItem.Builder().setUri(android.net.Uri.fromFile(file)).setImageDurationMs(totalMs).build()
+                b.addItem(
+                    EditedMediaItem.Builder(item)
+                        .setDurationUs(totalMs * 1000)
+                        .setFrameRate(fps)
+                        .setRemoveAudio(true)
+                        .setEffects(Effects(ImmutableList.of(), ImmutableList.of<Effect>(Presentation.createForWidthAndHeight(w, h, Presentation.LAYOUT_STRETCH_TO_FIT))))
+                        .build(),
+                )
+            }
+            BackgroundMode.BLUR -> {
+                val main = p.mainTrack
+                if (main.hidden) return null
+                TimelineOps.segments(p, main.id, padToMs = totalMs).forEach { s ->
+                    val asset = (s as? Segment.Item)?.let { p.asset(it.clip.assetId) }
+                    if (s is Segment.Gap || asset == null) {
+                        b.addGap(s.durationMs * 1000)
+                    } else {
+                        val clip = (s as Segment.Item).clip
+                        val effects = ImmutableList.of<Effect>(
+                            Presentation.createForWidthAndHeight(VideoEffects.evenPx(w / 8f), VideoEffects.evenPx(h / 8f), Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
+                            androidx.media3.effect.GaussianBlur(3f),
+                            StaticRgb(VideoEffects.scaleMatrix(0.6f, 0.6f, 0.6f)),
+                            Presentation.createForWidthAndHeight(w, h, Presentation.LAYOUT_STRETCH_TO_FIT),
+                        )
+                        val eb = EditedMediaItem.Builder(mediaItem(asset, clip)).setFrameRate(fps).setRemoveAudio(true).setEffects(Effects(ImmutableList.of(), effects))
+                        if (asset.kind == MediaKind.IMAGE) eb.setDurationUs(clip.durationMs * 1000) else eb.setDurationUs(asset.durationMs * 1000).applySpeed(clip)
+                        b.addItem(eb.build())
+                    }
+                }
+            }
+        }
+        return b.build()
+    }
+
+    private fun colorImage(context: Context, color: Int): java.io.File? = runCatching {
+        val dir = java.io.File(context.cacheDir, "backgrounds").apply { mkdirs() }
+        val f = java.io.File(dir, "bg_" + Integer.toHexString(color) + ".png")
+        if (!f.exists()) {
+            val bmp = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+            bmp.eraseColor(color or (0xFF shl 24))
+            f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        f
+    }.getOrNull()
 
     /** Segmenty jednej warstwy A/B w formacie [Segment] (klip z poszerzonym zakresem). */
     private fun layerSegments(items: List<Dissolves.Item>, layer: Int, padToMs: Long): List<Segment> =
@@ -266,7 +334,7 @@ object CompositionFactory {
         override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
             val tMs = presentationTimeUs / 1000
             return when (val input = inputs.getOrNull(inputId)) {
-                null, Input.MainBase -> full
+                null, Input.MainBase, Input.Background -> full
                 is Input.MainTop -> {
                     val item = input.items.firstOrNull { tMs >= it.render.startMs && tMs < it.render.endMs } ?: return hidden
                     alpha(item.alpha(tMs))

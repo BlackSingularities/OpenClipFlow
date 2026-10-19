@@ -33,6 +33,12 @@ class ProjectJsonTest {
         assertTrue(p.audioTracks.isNotEmpty())
     }
 
+    @Test fun oldDetachedAudioBecomesAudioOnly() {
+        val v = MediaAsset(id = "v", uri = "content://v", name = "a.mp4", kind = MediaKind.VIDEO, durationMs = 9_000)
+        val p = Project(assets = listOf(v), clips = listOf(Clip(id = "c", assetId = "v", trackId = "a1", startMs = 0, durationMs = 1_000)))
+        assertTrue(ProjectJson.decode(ProjectJson.encode(p)).clip("c")!!.audioOnly)
+    }
+
     @Test fun clipsWithMissingAssetsAreDropped() {
         val p = Project(clips = listOf(Clip(assetId = "missing", trackId = "v1", startMs = 0, durationMs = 1_000)))
         assertTrue(ProjectJson.decode(ProjectJson.encode(p)).clips.isEmpty())

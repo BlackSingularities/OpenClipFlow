@@ -77,7 +77,8 @@ sealed interface UiEvent {
 }
 
 /** Do czego wybierane są pliki w systemowym oknie wyboru. */
-enum class ImportTarget { LIBRARY, TIMELINE, OVERLAY, NEW_PROJECT, REPLACE }
+/** [TRACK] – na wskazaną ścieżkę ([EditorViewModel.importTrackId]). */
+enum class ImportTarget { LIBRARY, TIMELINE, OVERLAY, TRACK, NEW_PROJECT, REPLACE }
 
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val context get() = getApplication<Application>()
@@ -128,6 +129,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     var importTarget = ImportTarget.LIBRARY
     var replaceClipId: String? = null
+    var importTrackId: String? = null
+
+    /** Okno wyboru układu ekranu dzielonego. */
+    var layoutChooser by mutableStateOf(false)
 
     /** Edycja ciągła (suwak, przeciąganie): historia zapisuje stan sprzed gestu tylko raz. */
     private var liveBase: Project? = null
@@ -452,14 +457,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                         val r = when (target) {
                             ImportTarget.NEW_PROJECT -> TimelineOps.appendAsset(out, asset)
                             ImportTarget.OVERLAY -> TimelineOps.insertAsset(out, asset, at, overlayTrack.takeIf { asset.kind != MediaKind.AUDIO })
+                            ImportTarget.TRACK -> TimelineOps.insertAsset(out, asset, at, importTrackId)
                             else -> TimelineOps.insertAsset(out, asset, at)
                         }
                         if (r != null) {
                             var clip = r.second
                             out = r.first
                             if (target == ImportTarget.OVERLAY && clip.trackId != out.mainTrack.id && out.track(clip.trackId)?.kind == TrackKind.VIDEO) {
-                                clip = clip.copy(transform = clip.transform.copy(scale = 0.4f, offsetX = 0.27f, offsetY = -0.27f))
-                                out = TimelineOps.replace(out, clip)
+                                out = TimelineOps.setRegion(out, clip.id, com.openclipflow.app.model.LayoutPreset.PIP_BR) ?: out
+                                clip = out.clip(clip.id) ?: clip
                             }
                             at = if (target == ImportTarget.OVERLAY) at else clip.endMs
                             added += clip.id
@@ -495,7 +501,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val assets = if (p.assets.any { it.uri == asset.uri }) p.assets else p.assets + asset
             val a = assets.first { it.uri == asset.uri }
             val track = p.track(c.trackId) ?: return@edit null
-            if (!TimelineOps.accepts(track, a)) return@edit null
+            if (!TimelineOps.accepts(track, a, c)) return@edit null
             val maxDur = if (a.isStill) c.durationMs else minOf(c.durationMs, (a.durationMs / c.speed).toLong())
             TimelineOps.replace(p.copy(assets = assets), c.copy(assetId = a.id, sourceInMs = 0, durationMs = maxDur))
         }.let { ok -> toast(if (ok) "Podmieniono materiał" else "Ten plik nie pasuje do ścieżki") }
@@ -814,7 +820,158 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         events.tryEmit(UiEvent.OpenUrl(url))
     }
 
+    // ------------------------------------------------------------------ układy ekranu i tło
+
+    fun applySplitLayout(layout: com.openclipflow.app.model.SplitLayout) {
+        val ok = edit { p -> TimelineOps.applySplitLayout(p, playheadMs, layout) }
+        toast(if (ok) "Układ: ${layout.label}" else "Pod głowicą potrzebne są dwa ujęcia – na ścieżce Wideo 1 i na ścieżce nad nią")
+    }
+
+    fun setClipLayout(clipId: String, preset: com.openclipflow.app.model.LayoutPreset) {
+        edit { p -> TimelineOps.setRegion(p, clipId, preset) }
+    }
+
+    fun setBackground(mode: com.openclipflow.app.model.BackgroundMode, color: Int = project.settings.background) {
+        updateSequence(project.settings.copy(backgroundMode = mode, background = color))
+    }
+
+    // ------------------------------------------------------------------ stop-klatka
+
+    /**
+     * Stop-klatka: zatrzymany kadr spod głowicy (zaznaczony klip albo główna ścieżka) jako zdjęcie
+     * wstawione w tym miejscu – klip zostaje rozcięty, reszta przesuwa się o długość stop-klatki.
+     */
+    fun freezeFrame(durationMs: Long = 2000) {
+        val t = playheadMs
+        val c = selectedClip?.takeIf { it.startMs <= t && t < it.endMs && project.track(it.trackId)?.kind == TrackKind.VIDEO }
+            ?: TimelineOps.clipAt(project, project.mainTrack.id, t)
+            ?: return toast("Pod głowicą nie ma obrazu")
+        val asset = project.asset(c.assetId) ?: return
+        busy = "Tworzenie stop-klatki…"
+        viewModelScope.launch {
+            val file = withContext(Dispatchers.IO) {
+                val src = if (asset.isStill) 0L else c.sourceInMs + ((t - c.startMs) * c.speed).toLong()
+                val bmp = Frames.fullFrame(context, asset, src) ?: return@withContext null
+                val dir = File(context.filesDir, "frames").apply { mkdirs() }
+                File(dir, "freeze-${System.currentTimeMillis()}.jpg").also { f -> f.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) } }
+            }
+            busy = null
+            if (file == null) return@launch toast("Nie można odczytać klatki")
+            val still = MediaAsset(
+                uri = Uri.fromFile(file).toString(),
+                name = "Stop-klatka ${TimeFormat.short(t)}",
+                kind = MediaKind.IMAGE,
+                durationMs = 0,
+                width = asset.displayWidth,
+                height = asset.displayHeight,
+                hasAudio = false,
+                sizeBytes = file.length(),
+            )
+            var created: Clip? = null
+            edit { p ->
+                val withAsset = p.copy(assets = p.assets + still)
+                TimelineOps.insertAsset(withAsset, still, t, c.trackId)?.let { (np, clip) ->
+                    created = clip
+                    // Stop-klatka dziedziczy wygląd i kadr klipu, z którego pochodzi.
+                    TimelineOps.replace(np, clip.copy(durationMs = durationMs, filter = c.filter, filterStrength = c.filterStrength, color = c.color, transform = c.transform.copy(kenBurns = com.openclipflow.app.model.KenBurns.NONE), opacity = c.opacity))
+                        .let { out -> if (clip.trackId == out.mainTrack.id) fixRipple(out, clip, durationMs) else out }
+                }
+            }
+            created?.let { selection = setOf(it.id) }
+            toast("Wstawiono stop-klatkę (${TimeFormat.duration(durationMs)})")
+        }
+    }
+
+    /** insertAsset przesunął klipy o domyślną długość zdjęcia – korekta do faktycznej długości. */
+    private fun fixRipple(p: Project, inserted: Clip, actualMs: Long): Project {
+        val delta = actualMs - inserted.durationMs
+        if (delta == 0L) return p
+        return p.copy(clips = p.clips.map { if (it.trackId == inserted.trackId && it.id != inserted.id && it.startMs >= inserted.startMs) it.copy(startMs = it.startMs + delta) else it })
+    }
+
+    // ------------------------------------------------------------------ lektor (nagrywanie głosu)
+
+    var recording by mutableStateOf(false)
+        private set
+    var recordStartMs by mutableLongStateOf(0L)
+        private set
+    var recordElapsedMs by mutableLongStateOf(0L)
+        private set
+    private var recorder: android.media.MediaRecorder? = null
+    private var recordFile: File? = null
+    private var recordJob: Job? = null
+
+    /** Nagrywanie głosu od miejsca głowicy; film odtwarza się w tym czasie bez dźwięku. */
+    fun startRecording() {
+        if (recording) return
+        val dir = File(context.filesDir, "voice").apply { mkdirs() }
+        val f = File(dir, "lektor-${System.currentTimeMillis()}.m4a")
+        val r = android.media.MediaRecorder(context)
+        try {
+            r.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            r.setAudioSamplingRate(48_000)
+            r.setAudioEncodingBitRate(128_000)
+            r.setAudioChannels(1)
+            r.setOutputFile(f.absolutePath)
+            r.prepare()
+            r.start()
+        } catch (e: Exception) {
+            runCatching { r.release() }
+            return toast("Nie można uruchomić mikrofonu: ${e.message}")
+        }
+        recorder = r
+        recordFile = f
+        recordStartMs = playheadMs
+        recordElapsedMs = 0
+        recording = true
+        preview.setVolume(0f)
+        if (project.durationMs > playheadMs + 100) play()
+        recordJob = viewModelScope.launch {
+            val started = System.currentTimeMillis()
+            while (isActive && recording) {
+                recordElapsedMs = System.currentTimeMillis() - started
+                delay(100)
+            }
+        }
+    }
+
+    fun stopRecording() {
+        if (!recording) return
+        recording = false
+        recordJob?.cancel()
+        val r = recorder
+        recorder = null
+        val ok = runCatching { r?.stop() }.isSuccess
+        runCatching { r?.release() }
+        pause()
+        preview.setVolume(1f)
+        val f = recordFile ?: return
+        if (!ok || f.length() < 1000) {
+            f.delete()
+            return toast("Nagranie za krótkie")
+        }
+        val start = recordStartMs
+        viewModelScope.launch {
+            val asset = withContext(Dispatchers.IO) { MediaProbe.probe(context, Uri.fromFile(f)) }?.copy(name = "Lektor ${TimeFormat.short(start)}", kind = MediaKind.AUDIO)
+                ?: return@launch toast("Nie można odczytać nagrania")
+            var created: Clip? = null
+            edit { p ->
+                val withAsset = p.copy(assets = p.assets + asset)
+                // Lektor ląduje na pierwszej wolnej ścieżce audio (albo nowej) dokładnie od miejsca startu.
+                TimelineOps.insertAsset(withAsset, asset, start)?.let { (np, c) -> created = c; np }
+            }
+            created?.let {
+                selection = setOf(it.id)
+                seek(it.startMs)
+            }
+            toast("Nagrano lektora: ${TimeFormat.duration(asset.durationMs)}")
+        }
+    }
+
     override fun onCleared() {
+        if (recording) runCatching { recorder?.stop(); recorder?.release() }
         preview.release()
         super.onCleared()
     }

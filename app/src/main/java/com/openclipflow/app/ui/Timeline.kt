@@ -417,7 +417,13 @@ private fun TrackHeaders(vm: EditorViewModel, lanes: List<Lane>, modifier: Modif
                     t.id == vm.project.mainTrack.id -> Icons.Rounded.Movie
                     else -> Icons.Rounded.PictureInPicture
                 }
-                Icon(icon, t?.name ?: "Dodaj napis", tint = Color.White, modifier = Modifier.size(16.dp))
+                Icon(icon, t?.name ?: "Napisy", tint = Color.White, modifier = Modifier.size(16.dp))
+                val code = when {
+                    t == null -> "T"
+                    t.kind == TrackKind.VIDEO -> "V" + (vm.project.videoTracks.indexOf(t) + 1)
+                    else -> "A" + (vm.project.audioTracks.indexOf(t) + 1)
+                }
+                Text(code, color = Palette.TextDim, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 if (t != null && lane.height > with(density) { 36.dp.toPx() }) {
                     Row {
                         if (t.muted) Icon(Icons.Rounded.VolumeOff, "Wyciszona", tint = Palette.Record, modifier = Modifier.size(11.dp))
@@ -551,7 +557,7 @@ private fun ClipBlock(
                         }
                         val y = origLaneTop + down.position.y + totalDy
                         val target = currentLanes.firstOrNull { it.track != null && y >= it.top && y < it.top + it.height }?.track
-                        val trackId = target?.takeIf { t -> asset != null && TimelineOps.accepts(t, asset) && !t.locked }?.id ?: currentClip.trackId
+                        val trackId = target?.takeIf { t -> asset != null && TimelineOps.accepts(t, asset, currentClip) && !t.locked }?.id ?: currentClip.trackId
                         vm.editLive { pr -> TimelineOps.move(pr, currentClip.id, start, trackId) }
                     }
                     if (longPressed) {

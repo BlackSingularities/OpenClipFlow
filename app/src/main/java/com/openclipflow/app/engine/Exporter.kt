@@ -42,7 +42,7 @@ object Exporter {
     ): ExportOutput {
         val seq = settings.resolve(project.settings)
         val audioOnly = settings.format == ExportFormat.AUDIO
-        val built = CompositionFactory.build(project, seq, includeTitles = true, audioOnly = audioOnly)
+        val built = CompositionFactory.build(context, project, seq, includeTitles = true, audioOnly = audioOnly)
             ?: error("Oś czasu jest pusta – dodaj klipy")
         val dir = File(context.cacheDir, "exports").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }

@@ -107,7 +107,7 @@ class PreviewEngine(context: Context) {
         lastSeq = seq
         val previewSeq = seq.copy(shortSide = minOf(seq.shortSide, 720))
         val built = try {
-            CompositionFactory.build(project, previewSeq, multiLayer = !overlaysUnsupported, includeTitles = false)
+            CompositionFactory.build(app, project, previewSeq, multiLayer = !overlaysUnsupported, includeTitles = false)
         } catch (e: Exception) {
             Log.w(TAG, "Nie można zbudować kompozycji", e)
             message = "Błąd kompozycji: ${e.message}"
@@ -151,6 +151,10 @@ class PreviewEngine(context: Context) {
 
     fun setScrubbing(on: Boolean) {
         runCatching { player?.setScrubbingModeEnabled(on) }
+    }
+
+    fun setVolume(v: Float) {
+        player?.volume = v
     }
 
     fun currentPositionMs(): Long = player?.currentPosition ?: 0L

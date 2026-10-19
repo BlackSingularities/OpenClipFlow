@@ -54,7 +54,13 @@ object ProjectJson {
         if (tracks.none { it.kind == TrackKind.AUDIO }) tracks = tracks + Track("a1", TrackKind.AUDIO, "Audio")
         val trackIds = tracks.map { it.id }.toSet()
         val assetIds = assets.map { it.id }.toSet()
-        return copy(tracks = tracks, clips = clips.filter { it.trackId in trackIds && it.assetId in assetIds })
+        val audioTrackIds = tracks.filter { it.kind == TrackKind.AUDIO }.map { it.id }.toSet()
+        val byId = assets.associateBy { it.id }
+        // Projekty sprzed 1.2: wideo na ścieżce audio = wyodrębniony dźwięk.
+        val fixed = clips.filter { it.trackId in trackIds && it.assetId in assetIds }.map { c ->
+            if (c.trackId in audioTrackIds && byId[c.assetId]?.kind == MediaKind.VIDEO && !c.audioOnly) c.copy(audioOnly = true) else c
+        }
+        return copy(tracks = tracks, clips = fixed)
     }
 }
 

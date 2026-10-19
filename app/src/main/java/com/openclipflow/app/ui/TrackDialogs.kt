@@ -1,6 +1,16 @@
 package com.openclipflow.app.ui
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Layers
@@ -25,9 +35,60 @@ import com.openclipflow.app.ui.theme.Palette
 
 /** Okna związane ze ścieżkami: wybór ścieżki do cięcia i menu nagłówka ścieżki. */
 @Composable
-fun TrackDialogs(vm: EditorViewModel) {
+fun TrackDialogs(vm: EditorViewModel, platform: com.openclipflow.app.PlatformActions) {
     if (vm.splitChooser) SplitChooser(vm)
-    vm.trackMenu?.let { TrackMenu(vm, it) }
+    if (vm.layoutChooser) LayoutChooser(vm)
+    vm.trackMenu?.let { TrackMenu(vm, platform, it) }
+}
+
+/** Miniatura układu: prostokąty obszarów w kadrze o proporcjach projektu; [accent] – podświetlony. */
+@Composable
+fun LayoutThumb(frames: List<com.openclipflow.app.model.Frame>, aspect: Float, selected: Boolean, accent: Int = -1, modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier) {
+    val fg = if (selected) Palette.Ink else androidx.compose.ui.graphics.Color.White
+    androidx.compose.foundation.Canvas(modifier.then(androidx.compose.ui.Modifier.aspectRatioSafe(aspect))) {
+        drawRoundRect(fg.copy(alpha = 0.25f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()))
+        frames.forEachIndexed { i, f ->
+            val inset = 1.5.dp.toPx()
+            drawRoundRect(
+                fg.copy(alpha = if (accent < 0 || accent == i) 0.95f else 0.55f),
+                topLeft = androidx.compose.ui.geometry.Offset(f.x * size.width + inset, f.y * size.height + inset),
+                size = androidx.compose.ui.geometry.Size((f.w * size.width - 2 * inset).coerceAtLeast(1f), (f.h * size.height - 2 * inset).coerceAtLeast(1f)),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+            )
+        }
+    }
+}
+
+private fun androidx.compose.ui.Modifier.aspectRatioSafe(a: Float) = this.aspectRatio(a.coerceIn(0.3f, 3f))
+
+@Composable
+private fun LayoutChooser(vm: EditorViewModel) {
+    val close = { vm.layoutChooser = false }
+    val s = vm.project.settings
+    val aspect = s.width.toFloat() / s.height
+    DarkDialog("Układ dwóch ujęć", onDismiss = close, buttons = { PillButton("Zamknij", primary = false, onClick = close) }) {
+        Text(
+            "Ustawia ujęcie ze ścieżki Wideo 1 i ujęcie ze ścieżki nad nią, które są pod głowicą. Każde z nich możesz potem dopracować w zakładce Kadr.",
+            color = Palette.TextDim,
+            fontSize = 12.sp,
+        )
+        com.openclipflow.app.model.SplitLayout.entries.forEach { l ->
+            androidx.compose.foundation.layout.Row(
+                androidx.compose.ui.Modifier
+                    .fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                    .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f))
+                    .clickable { close(); vm.applySplitLayout(l) }
+                    .padding(10.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                val frames = if (l == com.openclipflow.app.model.SplitLayout.RESET) listOf(com.openclipflow.app.model.Frame.FULL) else listOf(l.main.frame, l.upper.frame)
+                LayoutThumb(frames, aspect, selected = false, modifier = androidx.compose.ui.Modifier.height(40.dp))
+                androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.width(14.dp))
+                Text(l.label, color = androidx.compose.ui.graphics.Color.White, fontSize = 14.sp)
+            }
+        }
+    }
 }
 
 private fun trackLabel(vm: EditorViewModel, id: String): String =
@@ -54,7 +115,7 @@ private fun SplitChooser(vm: EditorViewModel) {
 }
 
 @Composable
-private fun TrackMenu(vm: EditorViewModel, id: String) {
+private fun TrackMenu(vm: EditorViewModel, platform: com.openclipflow.app.PlatformActions, id: String) {
     val close = { vm.trackMenu = null }
     val t = vm.project.track(id)
     val main = t?.id == vm.project.mainTrack.id
@@ -79,6 +140,11 @@ private fun TrackMenu(vm: EditorViewModel, id: String) {
                 vm.addTitle()
             }
             return@DarkDialog
+        }
+        ActionRow(Icons.Rounded.Add, "Dodaj pliki na tę ścieżkę", if (t.kind == TrackKind.AUDIO) "Muzyka i nagrania – w miejscu głowicy" else "Filmy i zdjęcia – w miejscu głowicy") {
+            close()
+            vm.importTrackId = t.id
+            platform.pickMedia(ImportTarget.TRACK, if (t.kind == TrackKind.AUDIO) arrayOf("audio/*") else arrayOf("video/*", "image/*"))
         }
         ActionRow(Icons.Rounded.SpaceBar, "Usuń luki na ścieżce") {
             close()

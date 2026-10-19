@@ -1,5 +1,14 @@
 # Historia zmian
 
+## 1.2.0
+
+- **Dwa ujęcia naraz – układy ekranu**: obok siebie, jedno nad drugim, okienko (obraz w obrazie) albo ćwiartki. Narzędzie „Układ” ustawia oba ujęcia spod głowicy jednym dotknięciem, a w zakładce Kadr każde ujęcie dostaje 13 gotowych położeń. Kadrowanie, zoom i obrót działają w obrębie swojej części ekranu.
+- **Równorzędne ścieżki wideo**: „Wideo 1”, „Wideo 2”… (zamiast „nakładki”), oznaczenia V1/V2/A1 na osi czasu, pliki można dodać na dowolną ścieżkę z jej menu.
+- **Ścieżki audio tylko dla dźwięku**: nie da się już upuścić na nie filmu ani zdjęcia. Dźwięk odłączony od wideo jest osobnym klipem dźwiękowym i można go przenosić tylko między ścieżkami audio.
+- **Tło kadru**: czarne, w wybranym kolorze albo rozmyta kopia ujęcia (np. pionowe nagranie w filmie 16:9).
+- **Lektor**: nagrywanie głosu z mikrofonu od miejsca głowicy, z odtwarzaniem filmu w tle; nagranie ląduje na wolnej ścieżce audio.
+- **Stop-klatka**: zatrzymany kadr spod głowicy wstawiany jako 2-sekundowe ujęcie z tym samym filtrem i kadrem.
+
 ## 1.1.0
 
 - **Przenikanie między ujęciami**: płynne przejście jednego klipu w drugi na głównej ścieżce (0,3–2 s). Punkty cięcia i długość filmu się nie zmieniają – przenikanie korzysta z zapasu materiału przed wejściem następnego i za wyjściem poprzedniego klipu (montaż A/B), dźwięk krzyżuje się razem z obrazem.
