@@ -19,8 +19,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build release APK
-        run: gradle --no-daemon assembleRelease
+      - name: Run unit tests and build release APK
+        run: gradle --no-daemon testDebugUnitTest assembleRelease
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
