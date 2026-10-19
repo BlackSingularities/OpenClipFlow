@@ -1,6 +1,6 @@
 # OpenClipFlow
 
-OpenClipFlow is an Android-first, landscape-oriented editing-studio foundation built with Kotlin and Jetpack Compose. The project includes a dark tablet-friendly editor UI, media-bin browser, multitrack timeline, clip selection, drag scrubbing, split/duplicate/delete/copy/paste actions, per-clip effect toggles, inspector metadata, document-picker import, and an export-settings dialog.
+OpenClipFlow is an Android-first, landscape-oriented editing-studio prototype built with Kotlin and Jetpack Compose. It includes a dark tablet-friendly editor, searchable media bin, folder navigation, multitrack timeline clips with independent timeline instances, drag-to-reposition, playhead snapping, split, trim, duplicate, multi-select, copy/paste, per-clip effect toggles, inspector controls, persistent URI imports, local project autosave, JSON project open/save-as, simulated playback transport, and an export-preset dialog.
 
 ## Build
 
@@ -12,7 +12,7 @@ GitHub Actions builds a release APK on pushes and uploads it to workflow artifac
 
 ## Current implementation boundaries
 
-This repository is a working **editor UI and interaction prototype**, not yet a production media-rendering engine. Timeline items currently use the in-memory sample project; the document picker imports asset metadata/URIs into the media bin. Preview frames, real multi-clip sequencing, frame-accurate cutting, persistent project serialization, undo/redo history, actual 4K transcoding, and SMB/NFS mounting still require media-engine, storage, and network-service implementations. The 4K selector is an export-settings demonstration; it does not encode video. Camera EXIF values shown in the inspector are representative UI fields, not extracted metadata. NAS appears as a project-library location but does not establish a connection.
+This repository remains an **editor interaction prototype**, not a production media-rendering engine. The timeline, project persistence and edit history are implemented for the current in-memory model, but imported sources are not yet decoded into real preview frames, and playback is a timeline transport simulation. Clip trimming and splitting edit timeline metadata only; there is no frame-accurate media engine. Project JSON stores URI strings, which can become inaccessible if Android's document provider revokes access. Export presets do not encode video. Advanced effect slider controls are UI-only. Camera metadata is not extracted. NAS appears in the media library but does not establish an SMB connection. These features need a real codec/rendering, metadata, and network-storage implementation.
 
 Automatic installation of APK updates is subject to Android package signatures, installation permissions, and user consent. The release workflow publishes APKs, but an in-app updater and signed update verification must be implemented before claiming unattended self-updates.
 
