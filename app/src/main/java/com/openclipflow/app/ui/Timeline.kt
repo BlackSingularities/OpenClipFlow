@@ -31,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
@@ -257,8 +258,46 @@ fun Timeline(vm: EditorViewModel, platform: com.openclipflow.app.PlatformActions
                                 ClipBlock(vm, p, c, lane, lanes, pxPerMs, viewStart, viewEnd, ::xOf)
                             }
                         }
-                        // Przycisk „+” na końcu głównej ścieżki.
+                        // Cięcia głównej ścieżki: okno przenikania i przycisk ustawień przejścia.
                         val mainLane = lanes.firstOrNull { it.track?.id == p.mainTrack.id }
+                        if (mainLane != null) {
+                            val mainClips = p.clipsOn(p.mainTrack.id)
+                            mainClips.zipWithNext().forEach { (a, b) ->
+                                if (b.startMs - a.endMs > com.openclipflow.app.model.Dissolves.ADJACENT_MS || a.endMs - b.startMs > com.openclipflow.app.model.Dissolves.ADJACENT_MS) return@forEach
+                                val cutX = xOf(b.startMs)
+                                if (cutX < -40f || cutX > areaW + 40f) return@forEach
+                                val join = com.openclipflow.app.model.Dissolves.join(p, b)
+                                androidx.compose.runtime.key("cut" + b.id) {
+                                    if (join != null) {
+                                        val x0 = xOf(join.windowStart)
+                                        Box(
+                                            Modifier
+                                                .offset { IntOffset(x0.roundToInt(), mainLane.top.roundToInt()) }
+                                                .width(with(density) { (join.total * pxPerMs).coerceAtLeast(2f).toDp() })
+                                                .height(with(density) { mainLane.height.toDp() })
+                                                .background(Color.White.copy(alpha = 0.22f)),
+                                        )
+                                    }
+                                    Box(
+                                        Modifier
+                                            .offset { IntOffset(cutX.roundToInt() - 12.dp.roundToPx(), (mainLane.top + mainLane.height / 2).roundToInt() - 12.dp.roundToPx()) }
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (join != null) Color.White else Color.Black.copy(alpha = 0.75f))
+                                            .clickable { vm.openCut(b.id) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Gradient,
+                                            if (join != null) "Przenikanie ${TimeFormat.duration(join.total)}" else "Dodaj przejście",
+                                            tint = if (join != null) Palette.Ink else Color.White,
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        // Przycisk „+” na końcu głównej ścieżki.
                         if (mainLane != null) {
                             val endX = xOf(p.clipsOn(p.mainTrack.id).maxOfOrNull { it.endMs } ?: 0L) + with(density) { 6.dp.toPx() }
                             if (endX < areaW) {
@@ -367,7 +406,7 @@ private fun TrackHeaders(vm: EditorViewModel, lanes: List<Lane>, modifier: Modif
                     .clip(RoundedCornerShape(8.dp))
                     .background(Palette.PanelHigh)
                     .clickable {
-                        if (t == null) vm.addTitle() else vm.panel = PanelKind.TRACKS
+                        vm.trackMenu = t?.id ?: TITLES_LANE
                     },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,

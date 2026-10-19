@@ -143,6 +143,7 @@ fun EditorScreen(vm: EditorViewModel, platform: PlatformActions) {
             }
         }
         EditorPanels(vm, platform)
+        TrackDialogs(vm)
     }
 }
 
@@ -414,7 +415,7 @@ private fun tools(vm: EditorViewModel, platform: PlatformActions): List<Tool> {
             Tool(Icons.Rounded.TextFields, "Tekst") { vm.addTitle() },
             Tool(Icons.Rounded.AudioFile, "Muzyka") { platform.pickMedia(ImportTarget.TIMELINE, arrayOf("audio/*")) },
             Tool(Icons.Rounded.PictureInPicture, "Nakładka") { platform.pickMedia(ImportTarget.OVERLAY, arrayOf("video/*", "image/*")) },
-            Tool(Icons.Rounded.CallSplit, "Podziel") { vm.splitAtPlayhead() },
+            Tool(Icons.Rounded.CallSplit, "Podziel") { vm.splitTool() },
             Tool(Icons.Rounded.Layers, "Ścieżki", active = vm.panel == PanelKind.TRACKS) { vm.panel = PanelKind.TRACKS },
             Tool(Icons.Rounded.AspectRatio, "Format", active = vm.panel == PanelKind.PROJECT) { vm.panel = PanelKind.PROJECT },
             Tool(Icons.Rounded.SpaceBar, "Usuń luki") { vm.closeGaps() },

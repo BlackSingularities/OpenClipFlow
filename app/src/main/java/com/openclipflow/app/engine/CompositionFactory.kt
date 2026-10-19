@@ -21,6 +21,7 @@ import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import com.openclipflow.app.model.Clip
+import com.openclipflow.app.model.Dissolves
 import com.openclipflow.app.model.MediaAsset
 import com.openclipflow.app.model.MediaKind
 import com.openclipflow.app.model.Project
@@ -49,10 +50,22 @@ object CompositionFactory {
         val videoSequences: Int,
     )
 
+    /** Wejście kompozytora (kolejność = od góry): nakładka albo warstwa głównej ścieżki. */
+    private sealed interface Input {
+        data class Overlay(val track: Track) : Input
+        /** Górna warstwa A/B głównej ścieżki – krycie wg okien przenikania. */
+        data class MainTop(val items: List<Dissolves.Item>) : Input
+        data object MainBase : Input
+    }
+
+    /**
+     * [multiLayer] = false wyłącza wszystko, co wymaga kompozytora wielu wejść (nakładki
+     * i przenikania) – awaryjny podgląd na urządzeniach bez jego obsługi.
+     */
     fun build(
         project: Project,
         seq: SequenceSettings,
-        includeOverlays: Boolean = true,
+        multiLayer: Boolean = true,
         includeTitles: Boolean = true,
         audioOnly: Boolean = false,
     ): Built? {
@@ -61,53 +74,71 @@ object CompositionFactory {
         val totalUs = total * 1000
         val w = seq.width
         val h = seq.height
+        val main = project.mainTrack
 
         val sequences = mutableListOf<EditedMediaItemSequence>()
-        // Kolejne sekwencje obrazu: indeks wejścia kompozytora → ścieżka nakładki.
-        val overlayInputs = mutableListOf<Track>()
+        val inputs = mutableListOf<Input>()
+        // Przenikania: główna ścieżka jako dwie warstwy (montaż A/B).
+        val abItems = if (multiLayer && !main.hidden && Dissolves.hasAny(project)) Dissolves.layers(project) else null
 
         if (!audioOnly) {
-            val overlays = if (includeOverlays) {
+            val overlays = if (multiLayer) {
                 project.videoTracks.drop(1).filter { t -> !t.hidden && project.clips.any { it.trackId == t.id } }.reversed()
             } else {
                 emptyList()
             }
             overlays.forEach { t ->
-                sequences += videoSequence(project, t, total, w, h, seq.fps, overlay = true)
-                overlayInputs += t
+                sequences += videoSequence(project, t, TimelineOps.segments(project, t.id, padToMs = total), w, h, seq.fps, overlay = true)
+                inputs += Input.Overlay(t)
             }
-            sequences += videoSequence(project, project.mainTrack, total, w, h, seq.fps, overlay = false)
+            if (abItems != null) {
+                sequences += videoSequence(project, main, layerSegments(abItems, 1, total), w, h, seq.fps, overlay = false)
+                inputs += Input.MainTop(abItems.filter { it.layer == 1 })
+                sequences += videoSequence(project, main, layerSegments(abItems, 0, total), w, h, seq.fps, overlay = false)
+                inputs += Input.MainBase
+            } else {
+                val segs = if (main.hidden) listOf(Segment.Gap(total)) else TimelineOps.segments(project, main.id, padToMs = total)
+                sequences += videoSequence(project, main, segs, w, h, seq.fps, overlay = false)
+                inputs += Input.MainBase
+            }
         }
 
         project.audioTracks.filter { !it.muted }.forEach { t ->
             val segs = TimelineOps.segments(project, t.id) { c -> !c.muted }
             if (segs.any { it is Segment.Item }) sequences += audioSequence(project, t, segs)
         }
-        if (audioOnly && sequences.isEmpty()) {
-            // Sam obraz bez dźwięku – plik audio z ciszą o długości projektu.
-            sequences += EditedMediaItemSequence.Builder(ImmutableSet.of(C.TRACK_TYPE_AUDIO)).addGap(totalUs).build()
-        }
         if (audioOnly) {
-            // Dźwięk z głównej ścieżki obrazu też trafia do pliku audio.
-            val main = project.mainTrack
+            // Sam dźwięk: cisza o długości projektu + dźwięk głównej ścieżki obrazu.
+            sequences += EditedMediaItemSequence.Builder(ImmutableSet.of(C.TRACK_TYPE_AUDIO)).addGap(totalUs).build()
             if (!main.muted) {
-                val segs = TimelineOps.segments(project, main.id) { c -> !c.muted && project.asset(c.assetId)?.hasAudio == true }
-                if (segs.any { it is Segment.Item }) sequences += audioSequence(project, main, segs)
+                val hasAudio = { c: Clip -> !c.muted && project.asset(c.assetId)?.hasAudio == true }
+                val mainSegs = if (abItems != null) {
+                    listOf(layerSegments(abItems, 0, 0), layerSegments(abItems, 1, 0))
+                } else {
+                    listOf(TimelineOps.segments(project, main.id))
+                }
+                mainSegs.forEach { segs ->
+                    val filtered = segs.map { if (it is Segment.Item && !hasAudio(it.clip)) Segment.Gap(it.durationMs) else it }
+                    if (filtered.any { it is Segment.Item }) sequences += audioSequence(project, main, filtered)
+                }
             }
         }
 
         val builder = Composition.Builder(sequences)
-        val videoCount = if (audioOnly) 0 else overlayInputs.size + 1
-        if (overlayInputs.isNotEmpty()) builder.setVideoCompositorSettings(OverlayCompositor(project, overlayInputs, w, h))
+        val videoCount = if (audioOnly) 0 else inputs.size
+        if (!audioOnly && inputs.size > 1) builder.setVideoCompositorSettings(LayerCompositor(project, inputs, w, h))
         if (!audioOnly && includeTitles && project.titles.isNotEmpty()) {
             builder.setEffects(Effects(ImmutableList.of(), ImmutableList.of<Effect>(OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(TitlesOverlay(project.titles))))))
         }
         return Built(builder.build(), total, videoCount)
     }
 
-    private fun videoSequence(p: Project, track: Track, totalMs: Long, w: Int, h: Int, fps: Int, overlay: Boolean): EditedMediaItemSequence {
+    /** Segmenty jednej warstwy A/B w formacie [Segment] (klip z poszerzonym zakresem). */
+    private fun layerSegments(items: List<Dissolves.Item>, layer: Int, padToMs: Long): List<Segment> =
+        Dissolves.segments(items, layer, padToMs).map { (dur, item) -> if (item == null) Segment.Gap(dur) else Segment.Item(item.render) }
+
+    private fun videoSequence(p: Project, track: Track, segs: List<Segment>, w: Int, h: Int, fps: Int, overlay: Boolean): EditedMediaItemSequence {
         val b = EditedMediaItemSequence.Builder(ImmutableSet.of(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO))
-        val segs = if (track.hidden) listOf(Segment.Gap(totalMs)) else TimelineOps.segments(p, track.id, padToMs = totalMs)
         segs.forEach { s ->
             when (s) {
                 is Segment.Gap -> b.addGap(s.durationMs * 1000)
@@ -211,12 +242,13 @@ object CompositionFactory {
     }
 
     /**
-     * Kompozytor nakładek: wynik w rozdzielczości sekwencji; warstwa nakładki widoczna tylko
-     * w czasie trwania klipu, z kryciem i płynnym pojawianiem się/znikaniem (przejścia).
+     * Kompozytor warstw: wynik w rozdzielczości sekwencji. Nakładka widoczna tylko w czasie
+     * trwania klipu (krycie + płynne pojawianie się), górna warstwa A/B głównej ścieżki –
+     * krycie wg okien przenikania, dolna zawsze pełna.
      */
-    private class OverlayCompositor(
+    private class LayerCompositor(
         private val project: Project,
-        private val overlays: List<Track>,
+        private val inputs: List<Input>,
         private val w: Int,
         private val h: Int,
     ) : VideoCompositorSettings {
@@ -225,20 +257,33 @@ object CompositionFactory {
 
         override fun getOutputSize(inputSizes: List<Size>): Size = Size(w, h)
 
+        private fun alpha(a: Float): OverlaySettings = when {
+            a >= 0.999f -> full
+            a <= 0.001f -> hidden
+            else -> StaticOverlaySettings.Builder().setAlphaScale(a).build()
+        }
+
         override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
-            val track = overlays.getOrNull(inputId) ?: return full
             val tMs = presentationTimeUs / 1000
-            val clip = TimelineOps.clipAt(project, track.id, tMs) ?: return hidden
-            val local = (presentationTimeUs - clip.startMs * 1000).coerceAtLeast(0)
-            val level = VideoEffects.transitionLevel(
-                local,
-                clip.durationMs * 1000,
-                clip.transitionMs * 1000,
-                clip.transitionIn != com.openclipflow.app.model.Transition.NONE,
-                clip.transitionOut != com.openclipflow.app.model.Transition.NONE,
-            )
-            val alpha = (clip.opacity * level).coerceIn(0f, 1f)
-            return if (alpha >= 0.999f) full else StaticOverlaySettings.Builder().setAlphaScale(alpha).build()
+            return when (val input = inputs.getOrNull(inputId)) {
+                null, Input.MainBase -> full
+                is Input.MainTop -> {
+                    val item = input.items.firstOrNull { tMs >= it.render.startMs && tMs < it.render.endMs } ?: return hidden
+                    alpha(item.alpha(tMs))
+                }
+                is Input.Overlay -> {
+                    val clip = TimelineOps.clipAt(project, input.track.id, tMs) ?: return hidden
+                    val local = (presentationTimeUs - clip.startMs * 1000).coerceAtLeast(0)
+                    val level = VideoEffects.transitionLevel(
+                        local,
+                        clip.durationMs * 1000,
+                        clip.transitionMs * 1000,
+                        clip.transitionIn != com.openclipflow.app.model.Transition.NONE,
+                        clip.transitionOut != com.openclipflow.app.model.Transition.NONE,
+                    )
+                    alpha(clip.opacity * level)
+                }
+            }
         }
     }
 }

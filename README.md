@@ -7,6 +7,7 @@ Edytor wideo na Androida (10+) w Kotlinie i Jetpack Compose, z silnikiem **Media
 - Wielościeżkowa oś czasu: główna ścieżka obrazu, nakładki (obraz w obrazie), dowolna liczba ścieżek audio i ścieżka napisów.
 - Przycinanie, rozcinanie, przesuwanie między ścieżkami, przyciąganie, usuwanie z przesunięciem, duplikowanie, znaczniki, cofnij/ponów.
 - Prędkość, głośność, wyciszanie, filtry, korekcja kolorów, rozmycie, kadr i obrót, Ken Burns, przejścia.
+- Przenikanie między ujęciami (montaż A/B z zapasem materiału) i cięcie pojedynczej ścieżki.
 - Napisy z animacjami – rysowane tym samym kodem w podglądzie i w eksporcie.
 - Podgląd z efektami GPU (`CompositionPlayer`) i eksport MP4 H.264/H.265 lub M4A do 4K / 60 kl/s.
 - Autozapis projektów, plik projektu `.ocf.json`, „Udostępnij do OpenClipFlow” z galerii.
@@ -35,6 +36,6 @@ Każdy push na `main` buduje, testuje i publikuje podpisane wydanie na GitHubie.
 
 ## Ograniczenia
 
-- Przejścia działają w obrębie klipu (wejście/wyjście przez czerń, biel, zoom, wjazd) – bez przenikania dwóch ujęć naraz.
-- Podgląd nakładek wymaga kompozytora wielu wejść; na urządzeniach, które go nie obsługują, podgląd pokazuje samą główną ścieżkę, a eksport i tak zawiera nakładki.
+- Przenikanie wymaga zapasu materiału przed wejściem następnego albo za wyjściem poprzedniego klipu; gdy go brak, jest skracane (zdjęcia mają zapas nieograniczony).
+- Podgląd nakładek i przenikań wymaga kompozytora wielu wejść; na urządzeniach, które go nie obsługują, podgląd pokazuje samą główną ścieżkę, a eksport i tak zawiera nakładki.
 - Projekt przechowuje odnośniki do plików (URI). Jeśli dostawca plików odbierze dostęp, trzeba je zaimportować ponownie.

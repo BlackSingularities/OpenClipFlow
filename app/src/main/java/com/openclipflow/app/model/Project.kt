@@ -124,6 +124,12 @@ data class Clip(
     val transitionIn: Transition = Transition.NONE,
     val transitionOut: Transition = Transition.NONE,
     val transitionMs: Long = 600,
+    /**
+     * Przenikanie z poprzedniego klipu głównej ścieżki (ms, 0 = twarde cięcie). Oś czasu się nie
+     * zmienia – przenikanie korzysta z zapasu materiału przed wejściem tego klipu i/lub za
+     * wyjściem poprzedniego (patrz [Dissolves]).
+     */
+    val dissolveInMs: Long = 0,
     val filter: FilterPreset = FilterPreset.NONE,
     val filterStrength: Float = 1f,
     val color: ColorAdjust = ColorAdjust(),

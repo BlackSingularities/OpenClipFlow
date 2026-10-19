@@ -57,7 +57,7 @@ class PreviewEngine(context: Context) {
             if (multiInput && !overlaysUnsupported) {
                 // Najczęściej: brak obsługi kompozytora wielu wejść – podgląd bez nakładek.
                 overlaysUnsupported = true
-                message = "Podgląd nakładek niedostępny na tym urządzeniu – eksport je uwzględni"
+                message = "Podgląd nakładek i przenikań niedostępny na tym urządzeniu – eksport je uwzględni"
                 val p = lastProject
                 val s = lastSeq
                 if (p != null && s != null) {
@@ -107,7 +107,7 @@ class PreviewEngine(context: Context) {
         lastSeq = seq
         val previewSeq = seq.copy(shortSide = minOf(seq.shortSide, 720))
         val built = try {
-            CompositionFactory.build(project, previewSeq, includeOverlays = !overlaysUnsupported, includeTitles = false)
+            CompositionFactory.build(project, previewSeq, multiLayer = !overlaysUnsupported, includeTitles = false)
         } catch (e: Exception) {
             Log.w(TAG, "Nie można zbudować kompozycji", e)
             message = "Błąd kompozycji: ${e.message}"

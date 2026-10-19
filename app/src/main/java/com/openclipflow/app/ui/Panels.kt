@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BrightnessMedium
+import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.material.icons.rounded.CenterFocusStrong
 import androidx.compose.material.icons.rounded.Contrast
 import androidx.compose.material.icons.rounded.Delete
@@ -419,11 +420,44 @@ private fun TransformTab(vm: EditorViewModel, c: Clip, overlay: Boolean) {
 }
 
 @Composable
+private fun DissolveChips(vm: EditorViewModel, target: Clip) {
+    val p = vm.project
+    val possible = com.openclipflow.app.model.Dissolves.maxPossible(p, target)
+    val actual = com.openclipflow.app.model.Dissolves.join(p, target)?.total ?: 0L
+    Chips(null, null, com.openclipflow.app.model.Dissolves.PRESETS, target.dissolveInMs, { if (it == 0L) "Cięcie" else TimeFormat.duration(it) }) { vm.setDissolve(target.id, it) }
+    Text(
+        when {
+            possible < com.openclipflow.app.model.Dissolves.MIN_MS -> "Brak zapasu materiału po obu stronach cięcia – skróć klip, by zrobić miejsce na przenikanie."
+            target.dissolveInMs > 0 && actual < target.dissolveInMs -> "Faktycznie ${TimeFormat.duration(actual)} – tyle pozwala zapas materiału."
+            else -> "Możliwe do ${TimeFormat.duration(possible)}. Punkt cięcia i długość filmu się nie zmieniają."
+        },
+        color = Palette.TextDim,
+        fontSize = 11.sp,
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
 private fun TransitionTab(vm: EditorViewModel, c: Clip) {
-    Group("Wejście") {
+    val p = vm.project
+    if (c.trackId == p.mainTrack.id) {
+        val prev = com.openclipflow.app.model.Dissolves.previousAdjacent(p, c)
+        val next = com.openclipflow.app.model.Dissolves.nextAdjacent(p, c)
+        if (prev != null) Group("Przenikanie z poprzedniego ujęcia") { DissolveChips(vm, c) }
+        if (next != null) Group("Przenikanie do następnego ujęcia") { DissolveChips(vm, next) }
+        if (prev != null || next != null) {
+            Group(null) {
+                ActionRow(Icons.Rounded.Animation, "Przenikanie na wszystkich cięciach", "Ten sam czas (${TimeFormat.duration((if (prev != null) c.dissolveInMs else next?.dissolveInMs ?: 0).coerceAtLeast(500))}) między wszystkimi ujęciami") {
+                    vm.setDissolveAll((if (prev != null) c.dissolveInMs else next?.dissolveInMs ?: 0).coerceAtLeast(500))
+                }
+                ActionRow(Icons.Rounded.Refresh, "Usuń wszystkie przenikania") { vm.setDissolveAll(0) }
+            }
+        }
+    }
+    Group(if (c.trackId == p.mainTrack.id) "Wejście klipu (bez przenikania)" else "Wejście") {
         Chips(null, null, Transition.entries, c.transitionIn, { it.label }) { vm.updateClip(c.copy(transitionIn = it)) }
     }
-    Group("Wyjście") {
+    Group(if (c.trackId == vm.project.mainTrack.id) "Wyjście klipu (bez przenikania)" else "Wyjście") {
         Chips(null, null, Transition.entries, c.transitionOut, { it.label }) { vm.updateClip(c.copy(transitionOut = it)) }
     }
     Group("Czas trwania") {
@@ -625,6 +659,7 @@ private fun TrackRow(vm: EditorViewModel, t: com.openclipflow.app.model.Track, m
             Text(t.name + if (main) " (główna)" else "", fontSize = 13.sp, maxLines = 1)
             Text("$count klipów", fontSize = 10.sp, color = Palette.TextDim)
         }
+        RoundIcon(Icons.Rounded.CallSplit, "Podziel tę ścieżkę", size = 34.dp, enabled = t.id in vm.tracksUnderPlayhead()) { vm.splitTrack(t.id) }
         if (t.kind == TrackKind.VIDEO) RoundIcon(if (t.hidden) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, if (t.hidden) "Pokaż" else "Ukryj", active = t.hidden, size = 34.dp) { vm.updateTrack(t.id) { it.copy(hidden = !it.hidden) } }
         RoundIcon(if (t.muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, if (t.muted) "Włącz dźwięk" else "Wycisz", active = t.muted, size = 34.dp) { vm.updateTrack(t.id) { it.copy(muted = !it.muted) } }
         RoundIcon(if (t.locked) Icons.Rounded.Lock else Icons.Rounded.LockOpen, if (t.locked) "Odblokuj" else "Zablokuj", active = t.locked, size = 34.dp) { vm.updateTrack(t.id) { it.copy(locked = !it.locked) } }

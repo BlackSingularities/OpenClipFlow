@@ -152,6 +152,7 @@ object TimelineOps {
             sourceInMs = c.sourceInMs + (offset * c.speed).roundToLong(),
             transitionIn = Transition.NONE,
             audioFadeInMs = 0,
+            dissolveInMs = 0,
         )
         return p.copy(clips = p.clips.map { if (it.id == clipId) left else it } + right)
     }

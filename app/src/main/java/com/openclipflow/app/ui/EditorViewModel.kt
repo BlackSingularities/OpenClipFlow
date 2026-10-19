@@ -53,6 +53,9 @@ import java.io.File
 
 enum class Screen { HOME, EDITOR }
 
+/** Identyfikator rzędu napisów w menu ścieżek i wyborze cięcia. */
+const val TITLES_LANE = "titles"
+
 /** Panele boczne edytora. */
 enum class PanelKind { NONE, MEDIA, CLIP, TITLE, PROJECT, EXPORT, SETTINGS, TRACKS }
 
@@ -499,6 +502,72 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------------ operacje montażowe
+
+    /** Wybór ścieżki do cięcia (gdy nic nie zaznaczono, a głowica przecina kilka ścieżek). */
+    var splitChooser by mutableStateOf(false)
+    /** Menu ścieżki otwarte z nagłówka na osi czasu (id ścieżki albo [TITLES_LANE]). */
+    var trackMenu by mutableStateOf<String?>(null)
+
+    /** Ścieżki (i rząd napisów), które głowica w tej chwili przecina. */
+    fun tracksUnderPlayhead(): List<String> {
+        val t = playheadMs
+        val ids = project.tracks.filter { tr -> !tr.locked && project.clips.any { it.trackId == tr.id && it.startMs < t && t < it.endMs } }.map { it.id }
+        return ids + listOfNotNull(TITLES_LANE.takeIf { project.titles.any { it.startMs < t && t < it.endMs } })
+    }
+
+    /** Narzędzie „Podziel”: z zaznaczeniem – zaznaczone; bez – pyta o ścieżkę, gdy jest wybór. */
+    fun splitTool() {
+        if (selection.isEmpty() && tracksUnderPlayhead().size > 1) splitChooser = true else splitAtPlayhead()
+    }
+
+    /** Tnie tylko jedną ścieżkę (albo rząd napisów) w miejscu głowicy. */
+    fun splitTrack(trackId: String) {
+        val t = playheadMs
+        val ok = edit { p ->
+            if (trackId == TITLES_LANE) {
+                var out = p
+                p.titles.forEach { tt -> TimelineOps.splitTitle(out, tt.id, t)?.let { out = it } }
+                out.takeIf { it != p }
+            } else {
+                if (p.track(trackId)?.locked == true) return@edit null
+                TimelineOps.splitAt(p, t, p.clips.filter { it.trackId == trackId }.map { it.id }.toSet().ifEmpty { return@edit null })
+            }
+        }
+        val name = if (trackId == TITLES_LANE) "napisy" else project.track(trackId)?.name ?: ""
+        toast(if (ok) "Rozcięto ścieżkę „$name” w ${TimeFormat.short(t)}" else "Głowica nie przecina klipu na tej ścieżce")
+    }
+
+    fun selectTrackClips(trackId: String) {
+        selection = if (trackId == TITLES_LANE) project.titles.map { it.id }.toSet() else project.clips.filter { it.trackId == trackId }.map { it.id }.toSet()
+        if (selection.isEmpty()) toast("Ścieżka jest pusta")
+    }
+
+    // ------------------------------------------------------------------ przenikania
+
+    /** Ustawia przenikanie z poprzedniego ujęcia na klipie [clipId] (0 = twarde cięcie). */
+    fun setDissolve(clipId: String, ms: Long, live: Boolean = false) {
+        val change: (Project) -> Project? = { p -> p.clip(clipId)?.let { TimelineOps.replace(p, it.copy(dissolveInMs = ms)) } }
+        if (live) editLive(change) else edit(change)
+        if (!live && ms > 0) {
+            val c = project.clip(clipId) ?: return
+            val possible = com.openclipflow.app.model.Dissolves.maxPossible(project, c)
+            if (possible < com.openclipflow.app.model.Dissolves.MIN_MS) toast("Brak zapasu materiału – skróć któryś klip, żeby przenikanie miało z czego powstać")
+            else if (possible < ms) toast("Przenikanie skrócone do ${TimeFormat.duration(possible)} (zapas materiału)")
+        }
+    }
+
+    fun setDissolveAll(ms: Long) {
+        val ok = edit { p -> com.openclipflow.app.model.Dissolves.applyToAll(p, ms) }
+        toast(if (!ok) "Brak stykających się klipów na głównej ścieżce" else if (ms > 0) "Przenikanie na wszystkich cięciach" else "Usunięto przenikania")
+    }
+
+    /** Otwiera ustawienia przejścia dla cięcia przed klipem [nextClipId]. */
+    fun openCut(nextClipId: String) {
+        pause()
+        select(nextClipId)
+        clipTab = ClipTab.TRANSITION
+        panel = PanelKind.CLIP
+    }
 
     fun splitAtPlayhead() {
         val t = playheadMs

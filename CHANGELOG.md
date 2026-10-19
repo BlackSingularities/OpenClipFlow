@@ -1,5 +1,12 @@
 # Historia zmian
 
+## 1.1.0
+
+- **Przenikanie między ujęciami**: płynne przejście jednego klipu w drugi na głównej ścieżce (0,3–2 s). Punkty cięcia i długość filmu się nie zmieniają – przenikanie korzysta z zapasu materiału przed wejściem następnego i za wyjściem poprzedniego klipu (montaż A/B), dźwięk krzyżuje się razem z obrazem.
+- Na osi czasu każde cięcie głównej ścieżki ma przycisk przejścia, a okno przenikania jest zaznaczone. Jednym dotknięciem można ustawić przenikanie na wszystkich cięciach.
+- **Cięcie jednej ścieżki**: dotknięcie nagłówka ścieżki otwiera menu z „Podziel tę ścieżkę”; narzędzie „Podziel” pyta, czy ciąć wszystko, czy tylko wybraną ścieżkę, gdy głowica przecina kilka. Cięcie pojedynczej ścieżki także w panelu Ścieżki.
+- Menu ścieżki: zaznacz wszystko na ścieżce, usuń luki, wycisz, ukryj, zablokuj, usuń.
+
 ## 1.0.0
 
 Pierwsze pełne wydanie – OpenClipFlow staje się prawdziwym edytorem wideo.
