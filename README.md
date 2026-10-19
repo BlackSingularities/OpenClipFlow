@@ -1,31 +1,40 @@
 # OpenClipFlow
 
-OpenClipFlow is an Android-first, landscape-oriented editing-studio prototype built with Kotlin and Jetpack Compose. It includes a dark tablet-friendly editor, searchable media bin, folder navigation, multitrack timeline clips with independent timeline instances, drag-to-reposition, playhead snapping, split, trim, duplicate, multi-select, copy/paste, per-clip effect toggles, inspector controls, persistent URI imports, local project autosave, JSON project open/save-as, simulated playback transport, and an export-preset dialog.
+Edytor wideo na Androida (10+) w Kotlinie i Jetpack Compose, z silnikiem **Media3 Transformer**. Interfejs w stylu [OpenPDF](https://github.com/BlackSingularities/OpenPDF): czarno-biały, z pigułkowymi przyciskami i panelami bocznymi.
 
-## Build
+## Możliwości
 
-- Android Studio with JDK 17 and Android SDK platform 35 is recommended.
-- Open this directory in Android Studio and allow Gradle sync, or run `gradle assembleDebug` if Gradle is installed.
-- Minimum Android version: Android 8.0 (API 26). The interface is optimized for landscape/tablet use.
+- Wielościeżkowa oś czasu: główna ścieżka obrazu, nakładki (obraz w obrazie), dowolna liczba ścieżek audio i ścieżka napisów.
+- Przycinanie, rozcinanie, przesuwanie między ścieżkami, przyciąganie, usuwanie z przesunięciem, duplikowanie, znaczniki, cofnij/ponów.
+- Prędkość, głośność, wyciszanie, filtry, korekcja kolorów, rozmycie, kadr i obrót, Ken Burns, przejścia.
+- Napisy z animacjami – rysowane tym samym kodem w podglądzie i w eksporcie.
+- Podgląd z efektami GPU (`CompositionPlayer`) i eksport MP4 H.264/H.265 lub M4A do 4K / 60 kl/s.
+- Autozapis projektów, plik projektu `.ocf.json`, „Udostępnij do OpenClipFlow” z galerii.
+- Aktualizacje z GitHub Releases bezpośrednio w aplikacji.
 
-GitHub Actions builds a release APK on pushes and uploads it to workflow artifacts. Push a version tag such as `v0.1.0` to attach the APK to a GitHub Release.
-
-## Current implementation boundaries
-
-This repository remains an **editor interaction prototype**, not a production media-rendering engine. The timeline, project persistence and edit history are implemented for the current in-memory model, but imported sources are not yet decoded into real preview frames, and playback is a timeline transport simulation. Clip trimming and splitting edit timeline metadata only; there is no frame-accurate media engine. Project JSON stores URI strings, which can become inaccessible if Android's document provider revokes access. Export presets do not encode video. Advanced effect slider controls are UI-only. Camera metadata is not extracted. NAS appears in the media library but does not establish an SMB connection. These features need a real codec/rendering, metadata, and network-storage implementation.
-
-Automatic installation of APK updates is subject to Android package signatures, installation permissions, and user consent. The release workflow publishes APKs, but an in-app updater and signed update verification must be implemented before claiming unattended self-updates.
-
-## Publish as your public GitHub repository
-
-To publish under the authenticated account, create a **public empty repository** named `OpenClipFlow` on GitHub if it does not already exist, then run in this directory:
+## Budowanie
 
 ```bash
-git init -b main
-git add .
-git commit -m "Build OpenClipFlow Android editor foundation"
-git remote add origin https://github.com/YOUR_ACCOUNT/OpenClipFlow.git
-git push -u origin main
+./gradlew testDebugUnitTest :app:assembleRelease
 ```
 
-Create releases by pushing a tag, for example `git tag v0.1.0 && git push origin v0.1.0`.
+Wymagany JDK 17 i Android SDK 36. Wynik: `app/build/outputs/apk/release/app-release.apk`.
+
+### Podpis wydań
+
+APK release jest podpisywany kluczem PKCS12:
+
+- **CI (GitHub Actions)** – z sekretów `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_PASSWORD`, `SIGNING_KEY_ALIAS`; workflow przerywa wydanie, jeśli APK zostałby podpisany kluczem debug.
+- **Lokalnie** – z katalogu `~/.openclipflow-signing/` (`release.p12` + `password.txt`).
+
+To ten sam klucz, więc APK z GitHuba i zbudowany lokalnie aktualizują się nawzajem. Bez klucza (np. fork) build używa klucza debug.
+
+## Wydania
+
+Każdy push na `main` buduje, testuje i publikuje podpisane wydanie na GitHubie. Numer wersji pochodzi z pliku `VERSION`; gdy wydanie o tym numerze już istnieje, dostaje przyrostek z numerem budowania (np. `1.0.0.57`). Opis wydania jest brany z `CHANGELOG.md`.
+
+## Ograniczenia
+
+- Przejścia działają w obrębie klipu (wejście/wyjście przez czerń, biel, zoom, wjazd) – bez przenikania dwóch ujęć naraz.
+- Podgląd nakładek wymaga kompozytora wielu wejść; na urządzeniach, które go nie obsługują, podgląd pokazuje samą główną ścieżkę, a eksport i tak zawiera nakładki.
+- Projekt przechowuje odnośniki do plików (URI). Jeśli dostawca plików odbierze dostęp, trzeba je zaimportować ponownie.

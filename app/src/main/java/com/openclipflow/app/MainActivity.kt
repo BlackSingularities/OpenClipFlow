@@ -1,150 +1,119 @@
 package com.openclipflow.app
 
-import android.net.Uri
-import android.os.Bundle
-import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
-import org.json.JSONArray
-import org.json.JSONObject
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.*
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.*
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
-import java.util.UUID
+import androidx.activity.viewModels
+import androidx.compose.runtime.LaunchedEffect
+import androidx.core.content.FileProvider
+import com.openclipflow.app.ui.AppRoot
+import com.openclipflow.app.ui.EditorViewModel
+import com.openclipflow.app.ui.ImportTarget
+import com.openclipflow.app.ui.PanelKind
+import com.openclipflow.app.ui.Screen
+import com.openclipflow.app.ui.UiEvent
+import com.openclipflow.app.ui.theme.OpenClipFlowTheme
+import com.openclipflow.app.update.UpdateManager
 
-private val Bg = Color(0xFF080D16); private val Panel = Color(0xFF111925); private val Raised = Color(0xFF182434)
-private val Mint = Color(0xFF70E1C1); private val Muted = Color(0xFF8795A9); private val Line = Color(0xFF243144)
-internal data class Media(val id:String=UUID.randomUUID().toString(),val name:String,val kind:String,val duration:Float=8f,val uri:String="",val color:Color=Color(0xFF37B6A0),val effects:List<String> = emptyList())
-internal data class Track(val id:String,val name:String,val tint:Color,val audio:Boolean=false)
-internal data class TimelineClip(val id:String=UUID.randomUUID().toString(),val mediaId:String,val trackId:String,val start:Float,val duration:Float,val trimIn:Float=0f)
-internal data class SequenceSettings(val resolution:String="3840 × 2160",val fps:Int=30,val aspect:String="16:9",val snapping:Boolean=true)
-private data class EditSnapshot(val media:List<Media>,val clips:List<TimelineClip>,val tracks:List<Track>,val selected:Set<String>,val settings:SequenceSettings)
-
-internal object TimelineMath {
-    fun snap(position:Float,targets:List<Float>,threshold:Float=.35f):Float{val nearest=targets.minByOrNull{kotlin.math.abs(it-position)};return if(nearest!=null&&kotlin.math.abs(nearest-position)<threshold)nearest else position}
-    fun split(duration:Float,offset:Float):Pair<Float,Float>?{if(duration<=.1f||offset<=.05f||offset>=duration-.05f)return null;return offset to (duration-offset)}
-    fun trim(start:Float,duration:Float,newStart:Float?=null,newDuration:Float?=null):Triple<Float,Float,Float>{val adjustedStart=newStart?.coerceAtLeast(0f)?:start;val adjustedDuration=(newDuration?:duration).coerceAtLeast(.1f);return Triple(adjustedStart,adjustedDuration,(adjustedStart-start).coerceAtLeast(0f))}
+/** Akcje platformy wywoływane z interfejsu (okna wyboru plików systemu). */
+interface PlatformActions {
+    fun pickMedia(target: ImportTarget, kinds: Array<String> = arrayOf("video/*", "image/*", "audio/*"))
+    fun openProjectFile()
 }
 
-internal class EditorViewModel: ViewModel() {
-    var media by mutableStateOf(listOf(Media(name="Coastal drive.mp4",kind="VIDEO",duration=12f,color=Color(0xFF347DA2)),Media(name="Golden hour.mp4",kind="VIDEO",duration=9f,color=Color(0xFFE08B62)),Media(name="Forest path.mp4",kind="VIDEO",duration=16f,color=Color(0xFF517C61)),Media(name="ambient-score.wav",kind="AUDIO",duration=31f,color=Color(0xFF9877DB)),Media(name="cover-frame.jpg",kind="IMAGE",duration=5f,color=Color(0xFFCDAB72))))
-    var tracks by mutableStateOf(listOf(Track("v1","VIDEO 01",Color(0xFF46CDB0)),Track("v2","OVERLAY",Color(0xFFB17AE5)),Track("a1","AUDIO 01",Color(0xFFFFB765),true)))
-    var selected by mutableStateOf<String?>(null); var selectedIds by mutableStateOf(setOf<String>()); var playing by mutableStateOf(false); var playhead by mutableFloatStateOf(8.4f)
-    var search by mutableStateOf(""); var folder by mutableStateOf("All media"); var notice by mutableStateOf(""); var copied by mutableStateOf<Media?>(null)
-    var scale by mutableFloatStateOf(1f)
-    var clips by mutableStateOf(emptyList<TimelineClip>())
-    var projectName by mutableStateOf("Coastal story")
-    var projectUri by mutableStateOf<String?>(null)
-    var settings by mutableStateOf(SequenceSettings())
-    private val undoStack= mutableListOf<EditSnapshot>(); private val redoStack=mutableListOf<EditSnapshot>()
-    private var clipboard= emptyList<TimelineClip>()
-    private var clipDragSnapshot=false
-    init { seedTimeline() }
-    private fun seedTimeline(){clips=media.filter{it.kind!="AUDIO"}.take(3).mapIndexed{i,m->TimelineClip(mediaId=m.id,trackId="v1",start=listOf(0f,12f,21f)[i],duration=m.duration)}+media.filter{it.kind=="AUDIO"}.map{TimelineClip(mediaId=it.id,trackId="a1",start=0f,duration=it.duration)}}
-    private fun snapshot()=EditSnapshot(media,clips,tracks,selectedIds,settings)
-    private fun edit(block:()->Unit){undoStack.add(snapshot());if(undoStack.size>80)undoStack.removeAt(0);redoStack.clear();block()}
-    fun undo(){if(undoStack.isEmpty()){notice="Nothing to undo";return};redoStack.add(snapshot());restore(undoStack.removeAt(undoStack.lastIndex));notice="Edit undone"}
-    fun redo(){if(redoStack.isEmpty()){notice="Nothing to redo";return};undoStack.add(snapshot());restore(redoStack.removeAt(redoStack.lastIndex));notice="Edit redone"}
-    private fun restore(s:EditSnapshot){media=s.media;clips=s.clips;tracks=s.tracks;selectedIds=s.selected;settings=s.settings;selected=selectedIds.firstOrNull()}
-    fun add(uri:Uri,name:String){val kind=if(name.substringAfterLast('.',"").lowercase() in listOf("wav","mp3","m4a","aac","flac"))"AUDIO" else if(name.substringAfterLast('.',"").lowercase() in listOf("jpg","jpeg","png","webp","heic"))"IMAGE" else "VIDEO";edit{val m=Media(name=name,kind=kind,uri=uri.toString(),color=Color(0xFF438B97));media=media+m};notice="Imported $name"}
-    fun selectedClip()=media.firstOrNull{it.id==selected}
-    fun instances()=clips.filter{it.id in selectedIds}
-    fun select(id:String,additive:Boolean=false){val clip=clips.firstOrNull{it.id==id};selected=clip?.mediaId?:id;selectedIds=if(clip==null)emptySet()else if(additive){if(id in selectedIds)selectedIds-id else selectedIds+id}else setOf(id)}
-    fun selectMedia(id:String){selected=id;selectedIds=clips.filter{it.mediaId==id}.map{it.id}.toSet()}
-    fun addToTimeline(mediaId:String,trackId:String="v1"){val m=media.firstOrNull{it.id==mediaId}?:return;val clip=TimelineClip(mediaId=mediaId,trackId=trackId,start=clips.filter{it.trackId==trackId}.maxOfOrNull{it.start+it.duration}?:0f,duration=m.duration);edit{clips=clips+clip};selected=mediaId;selectedIds=setOf(clip.id);notice="Added to timeline"}
-    fun beginClipDrag(){if(!clipDragSnapshot){undoStack.add(snapshot());redoStack.clear();clipDragSnapshot=true}}
-    fun endClipDrag(){clipDragSnapshot=false}
-    fun moveClip(id:String,trackId:String,start:Float){val c=clips.firstOrNull{it.id==id}?:return;val raw=start.coerceAtLeast(0f);val snapped=if(settings.snapping)TimelineMath.snap(raw,clips.filter{it.id!=id}.flatMap{listOf(it.start,it.start+it.duration)}+playhead)else raw;val next=c.copy(trackId=trackId,start=snapped);val update={clips=clips.map{if(it.id==id)next else it}};if(clipDragSnapshot)update()else edit(update);selected=c.mediaId;selectedIds=selectedIds+c.id}
-    fun duplicate(){val chosen=clips.filter{it.id in selectedIds};if(chosen.isEmpty()){selectedClip()?.let{addToTimeline(it.id);return};notice="Select a timeline clip first";return};var copies= emptyList<TimelineClip>();edit{val shift=(chosen.maxOf{it.start+it.duration}-chosen.minOf{it.start})+.5f;copies=chosen.map{it.copy(id=UUID.randomUUID().toString(),start=it.start+shift)};clips=clips+copies};selectedIds=copies.map{it.id}.toSet();selected=copies.firstOrNull()?.mediaId;notice="${chosen.size} clip(s) duplicated"}
-    fun copy(){clipboard=clips.filter{it.id in selectedIds};notice=if(clipboard.isEmpty())"Select timeline clips first" else "${clipboard.size} clip(s) copied"}
-    fun paste(){if(clipboard.isEmpty())return;var pasted= emptyList<TimelineClip>();edit{val origin=clipboard.minOf{it.start};pasted=clipboard.map{it.copy(id=UUID.randomUUID().toString(),start=playhead+it.start-origin)};clips=clips+pasted};selectedIds=pasted.map{it.id}.toSet();selected=pasted.firstOrNull()?.mediaId;notice="Pasted at playhead"}
-    fun delete(){if(selectedIds.isEmpty()){notice="Select a clip first";return};edit{clips=clips.filterNot{it.id in selectedIds};selectedIds= emptySet();selected=null};notice="Timeline clips removed"}
-    fun split(){val chosen=clips.filter{it.id in selectedIds};val c=chosen.firstOrNull{playhead>it.start+.05f&&playhead<it.start+it.duration-.05f}?:chosen.firstOrNull();if(c==null){notice="Select a clip that contains the playhead";return};val halves=TimelineMath.split(c.duration,playhead-c.start);if(halves==null){notice="Move the playhead inside the selected clip to split";return};val (firstDuration,secondDuration)=halves;val m=media.first{it.id==c.mediaId};val secondMedia=m.copy(id=UUID.randomUUID().toString(),name=m.name.substringBeforeLast('.')+" — B."+m.name.substringAfterLast('.'));val secondClip=c.copy(id=UUID.randomUUID().toString(),mediaId=secondMedia.id,start=playhead,duration=secondDuration,trimIn=c.trimIn+firstDuration);edit{media=media+secondMedia;clips=clips.map{if(it.id==c.id)it.copy(duration=firstDuration)else it}+secondClip};selected=secondMedia.id;selectedIds=setOf(secondClip.id);notice="Split at ${"%.2f".format(playhead)} s"}
-    fun trim(id:String,left:Float?=null,right:Float?=null){val c=clips.firstOrNull{it.id==id}?:return;edit{clips=clips.map{if(it.id!=id)it else {val adjusted=TimelineMath.trim(c.start,c.duration,left?.let{c.start+it},right);c.copy(start=adjusted.first,duration=adjusted.second,trimIn=c.trimIn+adjusted.third)}}}}
-    fun effect(name:String){if(selectedIds.isEmpty()){notice="Select one or more timeline clips";return};val mediaIds=clips.filter{it.id in selectedIds}.map{it.mediaId}.toSet();edit{media=media.map{if(it.id in mediaIds)it.copy(effects=if(name in it.effects)it.effects-name else it.effects+name)else it}};notice="$name toggled for ${selectedIds.size} clip(s)"}
-    fun projectJson():String{val root=JSONObject().put("version",3).put("name",projectName).put("playhead",playhead).put("settings",JSONObject().put("resolution",settings.resolution).put("fps",settings.fps).put("aspect",settings.aspect).put("snapping",settings.snapping));val assets=JSONArray();media.forEach{assets.put(JSONObject().put("id",it.id).put("name",it.name).put("kind",it.kind).put("duration",it.duration.toDouble()).put("uri",it.uri).put("effects",JSONArray(it.effects)))};val sequence=JSONArray();clips.forEach{sequence.put(JSONObject().put("id",it.id).put("mediaId",it.mediaId).put("trackId",it.trackId).put("start",it.start.toDouble()).put("duration",it.duration.toDouble()).put("trimIn",it.trimIn.toDouble()))};return root.put("media",assets).put("clips",sequence).toString(2)}
-    fun save(context:Context){try{context.getSharedPreferences("editor",Context.MODE_PRIVATE).edit().putString("project",projectJson()).apply();notice="Project saved"}catch(e:Exception){notice="Save failed: ${e.message}"}}
-    fun openProject(context:Context,uri:Uri){try{val raw=context.contentResolver.openInputStream(uri)?.bufferedReader()?.use{it.readText()}?:throw IllegalStateException("Unable to read project");restoreProject(JSONObject(raw));context.getSharedPreferences("editor",Context.MODE_PRIVATE).edit().putString("project",raw).apply();projectUri=uri.toString();notice="Project opened"}catch(e:Exception){notice="Open failed: ${e.message}"}}
-    private fun restoreProject(root:JSONObject){projectName=root.optString("name","Untitled");playhead=root.optDouble("playhead",0.0).toFloat();val s=root.optJSONObject("settings");settings=SequenceSettings(s?.optString("resolution","3840 × 2160")?:"3840 × 2160",s?.optInt("fps",30)?:30,s?.optString("aspect","16:9")?:"16:9",s?.optBoolean("snapping",true)?:true);val assets=root.getJSONArray("media");media=(0 until assets.length()).map{i->val o=assets.getJSONObject(i);val effects=o.optJSONArray("effects")?:JSONArray();Media(id=o.getString("id"),name=o.getString("name"),kind=o.getString("kind"),duration=o.optDouble("duration",8.0).toFloat(),uri=o.optString("uri"),effects=(0 until effects.length()).map{j->effects.getString(j)})};val seq=root.getJSONArray("clips");clips=(0 until seq.length()).map{i->val o=seq.getJSONObject(i);TimelineClip(id=o.getString("id"),mediaId=o.getString("mediaId"),trackId=o.getString("trackId"),start=o.getDouble("start").toFloat(),duration=o.getDouble("duration").toFloat(),trimIn=o.optDouble("trimIn",0.0).toFloat())};selected=null;selectedIds=emptySet()}
-    fun load(context:Context){try{val raw=context.getSharedPreferences("editor",Context.MODE_PRIVATE).getString("project",null)?:return;restoreProject(JSONObject(raw));notice="Project loaded"}catch(e:Exception){notice="Project load failed: ${e.message}"}}
-}
+class MainActivity : ComponentActivity(), PlatformActions {
+    private val vm: EditorViewModel by viewModels()
 
-class MainActivity:ComponentActivity(){override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);window.statusBarColor=android.graphics.Color.rgb(8,13,22);window.navigationBarColor=android.graphics.Color.rgb(8,13,22);setContent { MaterialTheme(colorScheme=darkColorScheme(primary=Mint,background=Bg,surface=Panel)){EditorScreen() } }}}
+    private val pickMedia = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> vm.onPicked(uris) }
+    private val pickProject = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(vm::importProjectFile) }
+    private val saveExport = registerForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri -> uri?.let(vm::writeExportTo) }
+    private val saveAudio = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mp4")) { uri -> uri?.let(vm::writeExportTo) }
+    private val saveProject = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let(vm::writeProjectFile) }
 
-@Composable private fun EditorScreen(vm:EditorViewModel= viewModel()){
-    var tab by remember{mutableStateOf("Media")}; var export by remember{mutableStateOf(false)}; var settingsDialog by remember{mutableStateOf(false)}
-    val context=androidx.compose.ui.platform.LocalContext.current
-    val loadPicker=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()){uri->uri?.let{try{context.contentResolver.takePersistableUriPermission(it,Intent.FLAG_GRANT_READ_URI_PERMISSION)}catch(_:Exception){};vm.openProject(context,it)}}
-    val savePicker=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")){uri->uri?.let{try{context.contentResolver.openOutputStream(it)?.bufferedWriter()?.use{writer->writer.write(vm.projectJson())};vm.save(context);vm.notice="Project exported"}catch(e:Exception){vm.notice="Export failed: ${e.message}"}}}
-    val picker= rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()){uris->uris.forEach{uri->try{context.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}catch(_:Exception){};try{val column=android.provider.OpenableColumns.DISPLAY_NAME;val cursor=context.contentResolver.query(uri,null,null,null,null);val name=cursor?.use{if(it.moveToFirst())it.getString(it.getColumnIndexOrThrow(column))else "Imported media"}?:"Imported media";vm.add(uri,name)}catch(_:Exception){vm.add(uri,"Imported media")}}}
-    LaunchedEffect(Unit){vm.load(context)}
-    Column(Modifier.fillMaxSize().background(Bg)) {
-        Header(vm,onExport={export=true},onSettings={settingsDialog=true},onUndo={vm.undo()},onRedo={vm.redo()},onSave={vm.save(context)},onOpen={loadPicker.launch(arrayOf("application/json"))},onSaveAs={savePicker.launch("${vm.projectName.replace(' ','_')}.ocf.json")})
-        Row(Modifier.weight(1f).fillMaxWidth()) {
-            Library(vm,tab,{tab=it},{picker.launch(arrayOf("video/*","image/*","audio/*"))})
-            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal=14.dp, vertical=10.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                PreviewPanel(vm)
-                TimelinePanel(vm)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
+        }
+        UpdateManager.clearUpdatedNotification(this)
+        if (savedInstanceState == null) handleIntent(intent)
+        setContent {
+            OpenClipFlowTheme {
+                LaunchedEffect(Unit) { vm.events.collect(::onEvent) }
+                BackHandler(enabled = vm.screen == Screen.EDITOR) {
+                    when {
+                        vm.panel != PanelKind.NONE -> vm.panel = PanelKind.NONE
+                        vm.selection.isNotEmpty() -> vm.select(null)
+                        else -> vm.closeEditor()
+                    }
+                }
+                AppRoot(vm, this)
             }
-            Inspector(vm)
         }
     }
-    if(vm.notice.isNotEmpty()) LaunchedEffect(vm.notice){ kotlinx.coroutines.delay(2200);vm.notice="" }
-    if(vm.notice.isNotEmpty()) Box(Modifier.fillMaxSize().padding(bottom=65.dp),contentAlignment=Alignment.BottomCenter){Surface(color=Raised,shape=RoundedCornerShape(12.dp)){Text(vm.notice,Modifier.padding(horizontal=18.dp,vertical=11.dp),color=Mint,fontSize=12.sp)}}
-    if(export) AlertDialog(onDismissRequest={export=false},containerColor=Panel,title={Text("Export settings",color=Color.White)},text={Column{Text("Project: ${vm.projectName}",color=Muted);Spacer(Modifier.height(12.dp));listOf("1080p · H.264 · 12 Mbps","4K UHD · H.265 · 45 Mbps","4K UHD · ProRes · 120 Mbps").forEach{Row(Modifier.fillMaxWidth().clickable{vm.notice="$it preset selected"}.padding(vertical=8.dp)){Text("◉  ",color=Mint);Text(it,color=Color.White,fontSize=11.sp)}};Spacer(Modifier.height(8.dp));Text("Export rendering is not yet connected to a video codec.",color=Muted,fontSize=10.sp)}},confirmButton={TextButton(onClick={vm.notice="Export queued (render engine not connected)";export=false}){Text("Queue export",color=Mint)}},dismissButton={TextButton(onClick={export=false}){Text("Cancel",color=Muted)}})
-    if(settingsDialog) SettingsDialog(vm){settingsDialog=false}
-}
 
-@Composable private fun Header(vm:EditorViewModel,onExport:()->Unit,onSettings:()->Unit,onUndo:()->Unit,onRedo:()->Unit,onSave:()->Unit,onOpen:()->Unit,onSaveAs:()->Unit){Row(Modifier.fillMaxWidth().height(54.dp).background(Panel).padding(horizontal=16.dp),verticalAlignment=Alignment.CenterVertically){Text("◈",color=Mint,fontSize=25.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.width(9.dp));Column{Text("OPENCLIPFLOW",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.Bold,letterSpacing=1.5.sp);Text("STUDIO  /  ${vm.projectName}",color=Muted,fontSize=9.sp)};Spacer(Modifier.width(18.dp));TextButton(onClick=onOpen){Text("Open",color=Muted,fontSize=10.sp)};TextButton(onClick=onSave){Text("Save",color=Mint,fontSize=10.sp)};TextButton(onClick=onSaveAs){Text("Save as",color=Muted,fontSize=10.sp)};TextButton(onClick=onSettings){Text("Settings",color=Muted,fontSize=10.sp)};Spacer(Modifier.weight(1f));IconButton(onClick=onUndo){Icon(Icons.Default.Undo,"Undo",tint=Muted)};IconButton(onClick=onRedo){Icon(Icons.Default.Redo,"Redo",tint=Muted)};Spacer(Modifier.width(9.dp));Surface(color=Raised,shape=RoundedCornerShape(7.dp)){Text("  ${vm.settings.resolution}  ·  ${vm.settings.fps} FPS  ",Modifier.padding(vertical=8.dp),color=Mint,fontSize=10.sp)};Spacer(Modifier.width(12.dp));Button(onClick=onExport,colors=ButtonDefaults.buttonColors(containerColor=Mint,contentColor=Bg),shape=RoundedCornerShape(7.dp),contentPadding=PaddingValues(horizontal=18.dp, vertical=8.dp)){Text("Export",fontWeight=FontWeight.Bold,fontSize=12.sp)}}}
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
 
-@Composable private fun SettingsDialog(vm:EditorViewModel,onClose:()->Unit){AlertDialog(onDismissRequest=onClose,containerColor=Panel,title={Text("Project settings",color=Color.White)},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Sequence format",color=Muted,fontSize=10.sp);listOf("3840 × 2160","1920 × 1080","1080 × 1920").forEach{value->Text("${if(vm.settings.resolution==value)"●" else "○"}  $value",Modifier.fillMaxWidth().clickable{vm.settings=vm.settings.copy(resolution=value,aspect=if(value=="1080 × 1920")"9:16" else "16:9")}.padding(vertical=6.dp),color=if(vm.settings.resolution==value)Mint else Color.White,fontSize=11.sp)};Text("Frame rate",color=Muted,fontSize=10.sp);Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf(24,30,60).forEach{fps->FilterChip(selected=vm.settings.fps==fps,onClick={vm.settings=vm.settings.copy(fps=fps)},label={Text("$fps FPS")})}};Text("Aspect ratio: ${vm.settings.aspect}",color=Muted,fontSize=10.sp);Row(verticalAlignment=Alignment.CenterVertically){Checkbox(vm.settings.snapping,{vm.settings=vm.settings.copy(snapping=it)},colors=CheckboxDefaults.colors(checkedColor=Mint));Text("Magnetic snapping",color=Color.White,fontSize=11.sp)} }},confirmButton={TextButton(onClick={vm.notice="Project settings updated";onClose()}){Text("Done",color=Mint)}})}
+    override fun onStop() {
+        super.onStop()
+        if (vm.screen == Screen.EDITOR) vm.pause()
+    }
 
-@Composable private fun PreviewPanel(vm:EditorViewModel){
-    LaunchedEffect(vm.playing,vm.settings.fps){while(vm.playing){kotlinx.coroutines.delay(1000L/vm.settings.fps);vm.playhead=(vm.playhead+1f/vm.settings.fps).coerceAtMost(vm.clips.maxOfOrNull{it.start+it.duration}?:42f);if(vm.playhead>=(vm.clips.maxOfOrNull{it.start+it.duration}?:42f))vm.playing=false}}
-    val current=vm.clips.firstOrNull{vm.playhead>=it.start&&vm.playhead<it.start+it.duration}?.let{c->vm.media.firstOrNull{m->m.id==c.mediaId}}
-    Column(Modifier.fillMaxHeight().fillMaxWidth().background(Color(0xFF060A10),RoundedCornerShape(11.dp)).border(1.dp,Line,RoundedCornerShape(11.dp)).padding(10.dp)){
-        Row(verticalAlignment=Alignment.CenterVertically){Text("PROGRAM MONITOR",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));Text("${vm.settings.resolution} · ${vm.settings.fps} FPS",color=Muted,fontSize=9.sp)}
-        Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center){Box(Modifier.fillMaxHeight(.82f).aspectRatio(if(vm.settings.aspect=="9:16")9f/16f else 16f/9f).background(current?.color?:Color(0xFF263B46),RoundedCornerShape(5.dp)),contentAlignment=Alignment.Center){Text(current?.name?:"NO CLIP AT PLAYHEAD",color=Color.White,fontSize=11.sp)}}
-        Row(verticalAlignment=Alignment.CenterVertically){IconButton(onClick={vm.playhead=(vm.playhead-1f/vm.settings.fps).coerceAtLeast(0f)}){Icon(Icons.Default.SkipPrevious,"Previous frame",tint=Muted)};IconButton(onClick={vm.playing=!vm.playing}){Icon(if(vm.playing)Icons.Default.Pause else Icons.Default.PlayArrow,"Play",tint=Mint)};IconButton(onClick={vm.playhead+=1f/vm.settings.fps}){Icon(Icons.Default.SkipNext,"Next frame",tint=Muted)};Spacer(Modifier.weight(1f));Text("${"%.2f".format(vm.playhead)} s",color=Color.White,fontSize=10.sp)}
+    /** „Udostępnij do OpenClipFlow” / „Otwórz w…” z galerii – nowy projekt z tymi plikami. */
+    private fun handleIntent(intent: Intent?) {
+        intent ?: return
+        val uris: List<Uri> = when (intent.action) {
+            Intent.ACTION_SEND -> listOfNotNull(intent.parcelableExtra(Intent.EXTRA_STREAM))
+            Intent.ACTION_SEND_MULTIPLE -> intent.parcelableArrayListExtra(Intent.EXTRA_STREAM).orEmpty()
+            Intent.ACTION_VIEW, Intent.ACTION_EDIT -> listOfNotNull(intent.data)
+            else -> emptyList()
+        }
+        if (uris.isEmpty()) return
+        vm.requestImport(if (vm.screen == Screen.EDITOR) ImportTarget.TIMELINE else ImportTarget.NEW_PROJECT)
+        vm.onPicked(uris)
+    }
+
+    private fun Intent.parcelableExtra(key: String): Uri? =
+        if (Build.VERSION.SDK_INT >= 33) getParcelableExtra(key, Uri::class.java) else @Suppress("DEPRECATION") getParcelableExtra(key)
+
+    private fun Intent.parcelableArrayListExtra(key: String): List<Uri>? =
+        if (Build.VERSION.SDK_INT >= 33) getParcelableArrayListExtra(key, Uri::class.java) else @Suppress("DEPRECATION") getParcelableArrayListExtra(key)
+
+    override fun pickMedia(target: ImportTarget, kinds: Array<String>) {
+        vm.requestImport(target)
+        runCatching { pickMedia.launch(kinds) }.onFailure { vm.toast("Brak aplikacji do wybierania plików") }
+    }
+
+    override fun openProjectFile() {
+        runCatching { pickProject.launch(arrayOf("application/json", "application/octet-stream", "text/plain", "*/*")) }
+    }
+
+    private fun onEvent(e: UiEvent) {
+        when (e) {
+            is UiEvent.Share -> {
+                val uri = FileProvider.getUriForFile(this, "$packageName.files", e.file)
+                val send = Intent(Intent.ACTION_SEND).setType(e.mime).putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                startActivity(Intent.createChooser(send, "Udostępnij film"))
+            }
+            is UiEvent.OpenUrl -> try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(e.url)))
+            } catch (_: ActivityNotFoundException) {
+                vm.toast("Brak przeglądarki")
+            }
+            is UiEvent.SaveAs -> if (e.mime.startsWith("audio")) saveAudio.launch(e.name) else saveExport.launch(e.name)
+            is UiEvent.ExportProjectFile -> saveProject.launch(e.name)
+        }
     }
 }
-
-@Composable private fun TimelinePanel(vm:EditorViewModel){Column(verticalArrangement=Arrangement.spacedBy(5.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text("SEQUENCE  ${vm.settings.resolution} · ${vm.settings.aspect}",color=Muted,fontSize=9.sp);Spacer(Modifier.weight(1f));Text(if(vm.settings.snapping)"SNAP ON" else "SNAP OFF",color=Mint,fontSize=8.sp)};Timeline(vm)}}
-
-@Composable private fun Library(vm:EditorViewModel,tab:String,onTab:(String)->Unit,onImport:()->Unit){Column(Modifier.width(224.dp).fillMaxHeight().background(Panel).padding(12.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text("PROJECT",color=Muted,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp);Spacer(Modifier.weight(1f));IconButton(onClick=onImport,modifier=Modifier.size(30.dp)){Icon(Icons.Default.Add,"Import",tint=Mint,modifier=Modifier.size(18.dp))}};Spacer(Modifier.height(7.dp));listOf("All media","Favorites","Recent","NAS · Studio archive").forEachIndexed{i,s->Row(Modifier.fillMaxWidth().clickable{vm.folder=s;vm.notice=if(i==3)"Connect to NAS: SMB setup is coming soon" else "$s selected"}.background(if(vm.folder==s)Raised else Color.Transparent,RoundedCornerShape(6.dp)).padding(8.dp),verticalAlignment=Alignment.CenterVertically){Text(listOf("▦","☆","◷","⌘")[i],color=if(vm.folder==s)Mint else Muted,fontSize=14.sp);Spacer(Modifier.width(8.dp));Text(s,color=if(vm.folder==s)Color.White else Muted,fontSize=11.sp);if(i==3)Text("  SMB",color=Mint,fontSize=8.sp)}};Spacer(Modifier.height(14.dp));HorizontalDivider(color=Line);Spacer(Modifier.height(9.dp));Row{listOf("Media","Folders").forEach{Text(it,Modifier.clickable{onTab(it)}.padding(end=17.dp,bottom=8.dp),color=if(tab==it)Mint else Muted,fontSize=11.sp,fontWeight=FontWeight.SemiBold)}};OutlinedTextField(value=vm.search,onValueChange={vm.search=it},modifier=Modifier.fillMaxWidth().height(46.dp),placeholder={Text("Search assets…",fontSize=10.sp)},singleLine=true,shape=RoundedCornerShape(8.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=Mint,unfocusedBorderColor=Line,focusedTextColor=Color.White,unfocusedTextColor=Color.White,unfocusedContainerColor=Bg,focusedContainerColor=Bg));Spacer(Modifier.height(8.dp));if(tab=="Media")LazyColumn(verticalArrangement=Arrangement.spacedBy(5.dp),modifier=Modifier.weight(1f)){items(vm.media.filter{it.name.contains(vm.search,true)}){m->MediaRow(m,vm.selectedClip()?.id==m.id){vm.selectMedia(m.id)}}}else LazyColumn(Modifier.weight(1f)){items(listOf("📁  Footage","   📁  Day one","   📁  Day two","📁  Audio","📁  Exports","📁  Shared with team")){Text(it,Modifier.fillMaxWidth().clickable{vm.folder=it;vm.notice="$it selected"}.padding(vertical=8.dp),color=Muted,fontSize=11.sp)}};HorizontalDivider(color=Line);Text("IMPORT MEDIA",Modifier.fillMaxWidth().clickable(onClick=onImport).padding(vertical=12.dp),color=Mint,fontSize=10.sp,fontWeight=FontWeight.Bold)} }
-
-@Composable private fun MediaRow(m:Media,selected:Boolean,onClick:()->Unit){Row(Modifier.fillMaxWidth().clickable(onClick=onClick).background(if(selected)Raised else Color.Transparent,RoundedCornerShape(7.dp)).padding(5.dp),verticalAlignment=Alignment.CenterVertically){Box(Modifier.size(52.dp,36.dp).background(Brush.linearGradient(listOf(m.color,m.color.copy(alpha=.35f))),RoundedCornerShape(5.dp)),contentAlignment=Alignment.Center){Text(if(m.kind=="AUDIO")"♫" else "▶",color=Color.White,fontSize=12.sp)};Spacer(Modifier.width(8.dp));Column(Modifier.weight(1f)){Text(m.name,color=if(selected)Color.White else Color(0xFFC3CEDA),fontSize=9.sp,maxLines=1);Text("${m.kind} · ${"%.1f".format(m.duration)}s",color=Muted,fontSize=8.sp)}}}
-
-@Composable private fun MediaCard(m:Media,vm:EditorViewModel){var dragging by remember{mutableStateOf(false)};Column(Modifier.width(98.dp).padding(end=7.dp).pointerInput(m.id){detectDragGestures(onDragStart={dragging=true},onDragEnd={if(dragging)vm.addToTimeline(m.id);dragging=false},onDragCancel={dragging=false},onDrag={change,_->change.consume()})}.clickable{vm.addToTimeline(m.id)}.background(Raised,RoundedCornerShape(7.dp)).padding(6.dp)){Box(Modifier.fillMaxWidth().height(48.dp).background(Brush.linearGradient(listOf(m.color,m.color.copy(alpha=.35f))),RoundedCornerShape(5.dp)),contentAlignment=Alignment.Center){Text(if(m.kind=="AUDIO")"♫" else "▶",color=Color.White,fontSize=17.sp)};Text(m.name,Modifier.padding(top=5.dp),color=Color.White,fontSize=8.sp,maxLines=1);Text("${m.kind} · ${"%.0f".format(m.duration)}s",color=Muted,fontSize=7.sp)}}
-
-@Composable private fun Preview(vm:EditorViewModel){LaunchedEffect(vm.playing){while(vm.playing){kotlinx.coroutines.delay(33);vm.playhead=(vm.playhead+1f/30f).coerceAtMost(vm.clips.maxOfOrNull{it.start+it.duration}?:42f);if(vm.playhead>=(vm.clips.maxOfOrNull{it.start+it.duration}?:42f))vm.playing=false}};val active=vm.clips.firstOrNull{vm.playhead>=it.start&&vm.playhead<it.start+it.duration};val current=active?.let{clip->vm.media.firstOrNull{it.id==clip.mediaId}};Column(Modifier.fillMaxHeight().fillMaxWidth().background(Color(0xFF060A10),RoundedCornerShape(11.dp)).border(1.dp,Line,RoundedCornerShape(11.dp)).padding(10.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text("PROGRAM MONITOR",color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp);Spacer(Modifier.weight(1f));Text("FIT  ·  3840 × 2160",color=Muted,fontSize=9.sp)};Box(Modifier.weight(1f).fillMaxWidth(),contentAlignment=Alignment.Center){Box(Modifier.fillMaxHeight(.82f).aspectRatio(16f/9f).background(Brush.linearGradient(listOf(current?.color?:Color(0xFF263B46),(current?.color?:Color(0xFF9C7257)).copy(alpha=.64f),Color(0xFF172C36))),RoundedCornerShape(5.dp)),contentAlignment=Alignment.Center){Column(horizontalAlignment=Alignment.CenterHorizontally){Text(if(current==null)"NO CLIP AT PLAYHEAD" else current.name,color=Color.White.copy(alpha=.9f),fontSize=11.sp,fontWeight=FontWeight.SemiBold);Text(if(current==null)"Drop media into a video track" else "PREVIEW  ·  ${current.kind}",Modifier.padding(top=5.dp),color=Color.White.copy(alpha=.7f),fontSize=8.sp)};Text("4K",Modifier.align(Alignment.BottomEnd).padding(10.dp),color=Color.White.copy(alpha=.7f),fontSize=9.sp)}};Row(verticalAlignment=Alignment.CenterVertically){IconButton(onClick={vm.playhead=(vm.playhead-1f/30f).coerceAtLeast(0f)}){Icon(Icons.Default.SkipPrevious,"Previous frame",tint=Muted)};IconButton(onClick={vm.playing=!vm.playing}){Icon(if(vm.playing)Icons.Default.Pause else Icons.Default.PlayArrow,"Play / pause",tint=Mint)};IconButton(onClick={vm.playhead+=1f/30f}){Icon(Icons.Default.SkipNext,"Next frame",tint=Muted)};Spacer(Modifier.weight(1f));Text("${(vm.playhead/60).toInt().toString().padStart(2,'0')}:${(vm.playhead%60).toInt().toString().padStart(2,'0')}:${((vm.playhead%1)*30).toInt().toString().padStart(2,'0')}   /   ${"%.1f".format(vm.clips.maxOfOrNull{it.start+it.duration}?:0f)}s",color=Color.White,fontSize=10.sp,fontWeight=FontWeight.Medium)}}}
-
-@Composable private fun Timeline(vm:EditorViewModel){Column(Modifier.fillMaxWidth().height(312.dp).background(Panel,RoundedCornerShape(10.dp)).padding(10.dp)){Row(verticalAlignment=Alignment.CenterVertically){Text("TIMELINE",color=Color.White,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp);Spacer(Modifier.width(8.dp));Text("${vm.clips.size} edits · ${vm.settings.fps} FPS",color=Muted,fontSize=9.sp);Spacer(Modifier.weight(1f));IconButton(onClick={vm.scale=(vm.scale*.8f).coerceAtLeast(.4f)},modifier=Modifier.size(28.dp)){Icon(Icons.Default.Remove,"Zoom out",tint=Muted)};Text("${(100*vm.scale).toInt()}%",color=Muted,fontSize=9.sp);IconButton(onClick={vm.scale=(vm.scale*1.25f).coerceAtMost(3f)},modifier=Modifier.size(28.dp)){Icon(Icons.Default.Add,"Zoom in",tint=Muted)};SmallAction("✂","Split"){vm.split()};SmallAction("⧉","Copy"){vm.copy()};SmallAction("▣","Paste"){vm.paste()};SmallAction("＋","Track"){vm.tracks=vm.tracks+Track(UUID.randomUUID().toString(),"VIDEO ${vm.tracks.size+1}",Color(0xFF9877DB));vm.notice="Track added"}}
-    Row(Modifier.fillMaxWidth().height(24.dp)){Spacer(Modifier.width(82.dp));for(i in 0..8)Text("${i*5}s",Modifier.weight(1f).clickable{vm.playhead=i*5f},color=Muted,fontSize=8.sp)}
-    vm.tracks.forEach{track->Row(Modifier.fillMaxWidth().height(48.dp).padding(bottom=4.dp)){Column(Modifier.width(82.dp).fillMaxHeight().background(Raised,RoundedCornerShape(5.dp)).padding(start=7.dp),verticalArrangement=Arrangement.Center){Text(track.name,color=track.tint,fontSize=8.sp,fontWeight=FontWeight.Bold);Text(if(track.audio)"♫  stereo" else "◉  video",color=Muted,fontSize=8.sp)};BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().background(Bg,RoundedCornerShape(5.dp)).pointerInput(track.id){detectDragGestures(onDrag={change,drag->change.consume();vm.playhead=(vm.playhead+drag.x/(8f*vm.scale)).coerceAtLeast(0f)})}){val pxPerSec=8f*vm.scale;val items=vm.clips.filter{it.trackId==track.id};items.forEach{clip->val media=vm.media.firstOrNull{it.id==clip.mediaId}?:return@forEach;val selected=clip.id in vm.selectedIds;val width=(clip.duration*pxPerSec).coerceAtLeast(40f).coerceAtMost(maxWidth.value);val x=(clip.start*pxPerSec).coerceIn(0f,(maxWidth.value-width).coerceAtLeast(0f));Row(Modifier.offset(x=x.dp).width(width.dp).fillMaxHeight().padding(vertical=3.dp).background(Brush.verticalGradient(listOf(media.color.copy(alpha=.95f),media.color.copy(alpha=.60f))),RoundedCornerShape(5.dp)).border(if(selected)2.dp else 0.dp,if(selected)Mint else Color.Transparent,RoundedCornerShape(5.dp)).pointerInput(clip.id){var total=0f;detectDragGestures(onDragStart={vm.beginClipDrag();vm.select(clip.id)},onDrag={change,drag->change.consume();total+=drag.x;val newStart=(clip.start+total/pxPerSec).coerceAtLeast(0f);vm.moveClip(clip.id,track.id,newStart);total=0f},onDragEnd={vm.endClipDrag()})}.clickable{vm.select(clip.id)},verticalAlignment=Alignment.CenterVertically){Text(if(track.audio)"  〰" else "  ▣",color=Color.White,fontSize=9.sp);Text(media.name,Modifier.weight(1f).padding(horizontal=3.dp),color=Color.White,fontSize=8.sp,maxLines=1);Row(Modifier.width(5.dp).fillMaxHeight().background(Color.White.copy(alpha=.55f)).clickable{vm.trim(clip.id,right=(clip.duration-.25f).coerceAtLeast(.1f))}){} }};Box(Modifier.offset(x=(vm.playhead*pxPerSec).dp).fillMaxHeight().width(2.dp).background(Color(0xFFFF6E83)).clickable{vm.playhead+=1f})}}
-    Row(horizontalArrangement=Arrangement.spacedBy(7.dp)){SmallAction("⧉","Duplicate"){vm.duplicate()};SmallAction("⌫","Delete"){vm.delete()};SmallAction("✦","Apply look"){vm.effect("Cinematic")};Text("Drag media into timeline · drag clips to reposition · Shift-select",Modifier.padding(start=8.dp,top=7.dp),color=Muted,fontSize=8.sp)}
-} }}
-@Composable private fun SmallAction(icon:String,label:String,onClick:()->Unit){Text("$icon $label",Modifier.clickable(onClick=onClick).background(Raised,RoundedCornerShape(5.dp)).padding(horizontal=7.dp,vertical=5.dp),color=Color(0xFFD0DAE5),fontSize=8.sp)}
-
-@Composable private fun Inspector(vm:EditorViewModel){var speed by remember(vm.selected){mutableFloatStateOf(1f)};var opacity by remember(vm.selected){mutableFloatStateOf(1f)};Column(Modifier.width(206.dp).fillMaxHeight().background(Panel).verticalScroll(rememberScrollState()).padding(12.dp)){Text("INSPECTOR",color=Muted,fontSize=10.sp,fontWeight=FontWeight.Bold,letterSpacing=1.sp);Spacer(Modifier.height(12.dp));val m=vm.selectedClip();if(m==null){Text("Nothing selected",color=Color.White,fontSize=13.sp,fontWeight=FontWeight.SemiBold);Text("Select one or more timeline clips to inspect.",Modifier.padding(top=5.dp),color=Muted,fontSize=10.sp);InspectorSection("QUICK TOOLS");listOf("Color grading","Stabilization","Audio cleanup","Scene detection").forEach{Text("✦  $it",Modifier.fillMaxWidth().clickable{vm.notice="$it selected"}.padding(vertical=11.dp),color=Color(0xFFD0DAE5),fontSize=10.sp)}}else{Text(m.name,color=Color.White,fontSize=12.sp,fontWeight=FontWeight.SemiBold);Text("${m.kind}  ·  ${"%.2f".format(m.duration)}s",color=Muted,fontSize=9.sp);Spacer(Modifier.height(12.dp));HorizontalDivider(color=Line);InspectorSection("CLIP");Property("Timeline start","${"%.2f".format(vm.clips.filter{it.mediaId==m.id}.minOfOrNull{it.start}?:0f)} s");Property("Instances","${vm.clips.count{it.mediaId==m.id}}");Property("Selected","${vm.selectedIds.size} clip(s)");InspectorSection("TRANSFORM");Property("Position X","0 px");Property("Position Y","0 px");Property("Scale","100%");Property("Rotation","0°");InspectorSection("SPEED & OPACITY");Text("Speed  ${"%.2f".format(speed)}×",color=Muted,fontSize=9.sp);Slider(value=speed,onValueChange={speed=it},valueRange=.25f..2f,colors=SliderDefaults.colors(thumbColor=Mint,activeTrackColor=Mint));Text("Opacity  ${(opacity*100).toInt()}%",color=Muted,fontSize=9.sp);Slider(value=opacity,onValueChange={opacity=it},colors=SliderDefaults.colors(thumbColor=Mint,activeTrackColor=Mint));HorizontalDivider(color=Line);InspectorSection("COLOR · EFFECTS  (${vm.selectedIds.size} selected)");listOf("Cinematic","Warm film","Soft glow","Vignette","Monochrome","Film grain").forEach{e->Row(Modifier.fillMaxWidth().clickable{vm.effect(e)}.padding(vertical=5.dp),verticalAlignment=Alignment.CenterVertically){Checkbox(m.effects.contains(e),onCheckedChange={vm.effect(e)},modifier=Modifier.size(22.dp),colors=CheckboxDefaults.colors(checkedColor=Mint,uncheckedColor=Muted));Text(e,color=Color(0xFFD0DAE5),fontSize=9.sp)}};HorizontalDivider(color=Line);InspectorSection("SOURCE PROPERTIES");Property("Duration","${"%.1f".format(m.duration)} sec");Property("Resolution","Metadata pending");Property("Frame rate","Metadata pending");Property("Codec","Read from source");if(m.uri.isNotBlank())Property("URI",m.uri.take(22)+"…");if(m.effects.isNotEmpty())Text("Applied: ${m.effects.joinToString()}",Modifier.padding(top=8.dp),color=Mint,fontSize=8.sp)}} }
-@Composable private fun InspectorSection(s:String){Text(s,Modifier.padding(vertical=9.dp),color=Muted,fontSize=9.sp,fontWeight=FontWeight.Bold,letterSpacing=.6.sp)}
-@Composable private fun Property(k:String,v:String){Row(Modifier.fillMaxWidth().padding(vertical=4.dp),verticalAlignment=Alignment.CenterVertically){Text(k,color=Muted,fontSize=9.sp,modifier=Modifier.weight(1f));Text(v,color=Color(0xFFD5DEE8),fontSize=9.sp)}}
