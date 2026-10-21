@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.LocalCafe
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.Animation
@@ -729,6 +731,8 @@ fun SettingsPanel(vm: EditorViewModel) {
         Group("O aplikacji") {
             InfoRow(Icons.Rounded.Info, "Wersja", UpdateManager.currentVersion + if (BuildConfig.RELEASE_SIGNED) "" else " (podpis testowy)")
             InfoRow(Icons.Rounded.Movie, "Silnik", "Media3 Transformer · efekty GPU · H.264 / H.265 / AAC")
+            ActionRow(Icons.Rounded.Person, "Projekt i wykonanie", "redzikowski.com") { vm.openUrl("https://redzikowski.com") }
+            ActionRow(Icons.Rounded.LocalCafe, "Postaw kawę", "Wesprzyj rozwój na buycoffee.to") { vm.openUrl("https://buycoffee.to/adamredzikowski") }
         }
     }
 }

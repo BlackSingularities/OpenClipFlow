@@ -41,3 +41,9 @@ Każdy push na `main` buduje, testuje i publikuje podpisane wydanie na GitHubie.
 - Przenikanie wymaga zapasu materiału przed wejściem następnego albo za wyjściem poprzedniego klipu; gdy go brak, jest skracane (zdjęcia mają zapas nieograniczony).
 - Podgląd nakładek i przenikań wymaga kompozytora wielu wejść; na urządzeniach, które go nie obsługują, podgląd pokazuje samą główną ścieżkę, a eksport i tak zawiera nakładki.
 - Projekt przechowuje odnośniki do plików (URI). Jeśli dostawca plików odbierze dostęp, trzeba je zaimportować ponownie.
+
+---
+
+**Projekt i wykonanie: [redzikowski.com](https://redzikowski.com)**
+
+<a href="https://buycoffee.to/adamredzikowski" target="_blank"><img src="https://buycoffee.to/static/img/share/share-button-dark--pl.png" style="width: 351px; height: 92px" width="351" height="92" alt="Postaw kawę dla adamredzikowski na buycoffee.to"></a>
