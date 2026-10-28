@@ -1,3 +1,9 @@
+## 1.2.2
+
+- Nowa strona aplikacji z opisem funkcji.
+- Jednolita informacja o autorze (Adam Rędzikowski · redzikowski.com) i przycisk „Postaw kawę”.
+- Usunięte odnośniki do repozytorium z interfejsu.
+
 ## 1.2.1 — Transparent application icon
 
 - Use the transparent application mark in launcher, splash and existing branding surfaces.
