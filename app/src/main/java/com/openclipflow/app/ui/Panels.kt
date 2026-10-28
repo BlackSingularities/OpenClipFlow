@@ -726,12 +726,11 @@ fun SettingsPanel(vm: EditorViewModel) {
                     else -> "Zainstalowana wersja ${UpdateManager.currentVersion}"
                 },
             ) { vm.checkUpdates() }
-            ActionRow(Icons.Rounded.Info, "Wydania na GitHubie", "github.com/${BuildConfig.UPDATE_REPO}") { vm.openReleasePage() }
         }
         Group("O aplikacji") {
             InfoRow(Icons.Rounded.Info, "Wersja", UpdateManager.currentVersion + if (BuildConfig.RELEASE_SIGNED) "" else " (podpis testowy)")
             InfoRow(Icons.Rounded.Movie, "Silnik", "Media3 Transformer · efekty GPU · H.264 / H.265 / AAC")
-            ActionRow(Icons.Rounded.Person, "Projekt i wykonanie", "redzikowski.com") { vm.openUrl("https://redzikowski.com") }
+            ActionRow(Icons.Rounded.Person, "Pomysł i wykonanie", "Adam Rędzikowski · redzikowski.com") { vm.openUrl("https://redzikowski.com") }
             ActionRow(Icons.Rounded.LocalCafe, "Postaw kawę", "Wesprzyj rozwój na buycoffee.to") { vm.openUrl("https://buycoffee.to/adamredzikowski") }
         }
     }

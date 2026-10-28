@@ -34,7 +34,7 @@ To ten sam klucz, więc APK z GitHuba i zbudowany lokalnie aktualizują się naw
 
 ## Wydania
 
-Każdy push na `main` buduje, testuje i publikuje podpisane wydanie na GitHubie. Numer wersji pochodzi z pliku `VERSION`; gdy wydanie o tym numerze już istnieje, dostaje przyrostek z numerem budowania (np. `1.0.0.57`). Opis wydania jest brany z `CHANGELOG.md`.
+Każdy wypchnięty tag `vX.Y.Z` buduje, testuje i publikuje podpisane wydanie na GitHubie. Numer wersji pochodzi z tagu. `1.0.0.57`). Opis wydania jest brany z `CHANGELOG.md`.
 
 ## Ograniczenia
 
