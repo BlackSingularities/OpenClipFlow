@@ -820,7 +820,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openReleasePage() {
-        val url = (update as? UpdateState.Available)?.info?.pageUrl ?: "https://github.com/${com.openclipflow.app.BuildConfig.UPDATE_REPO}/releases"
+        val url = (update as? UpdateState.Available)?.info?.pageUrl ?: "https://redzikowski.com/portfolio/openclipflow"
         events.tryEmit(UiEvent.OpenUrl(url))
     }
 
