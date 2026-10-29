@@ -1,5 +1,9 @@
 ## 1.2.2
 
+## 1.2.4
+
+- Dopasowane kolorystycznie tła ikon aplikacji i spójne zasoby graficzne.
+
 - Nowa strona aplikacji z opisem funkcji.
 - Jednolita informacja o autorze (Adam Rędzikowski · redzikowski.com) i przycisk „Postaw kawę”.
 - Usunięte odnośniki do repozytorium z interfejsu.
