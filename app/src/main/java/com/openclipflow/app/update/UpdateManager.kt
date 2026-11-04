@@ -33,7 +33,7 @@ object UpdateManager {
     private const val RESTART_KEY = "update.restart"
     private const val CHANNEL = "updates"
     private const val NOTIFICATION_ID = 4712
-    private const val API = "https://redzikowski.com/api/github/repos/" + BuildConfig.UPDATE_REPO + "/releases/latest"
+    private const val API = "https://redzikowski.com/api/releases/repos/" + BuildConfig.UPDATE_REPO + "/releases/latest"
 
     val currentVersion: String get() = BuildConfig.VERSION_NAME
 
@@ -43,7 +43,7 @@ object UpdateManager {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 15_000
-            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "OpenClipFlow/" + BuildConfig.VERSION_NAME)
         }
         try {
