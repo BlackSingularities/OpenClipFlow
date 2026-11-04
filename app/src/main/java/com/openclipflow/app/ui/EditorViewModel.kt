@@ -819,10 +819,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         events.tryEmit(UiEvent.OpenUrl(url))
     }
 
-    fun openReleasePage() {
-        val url = (update as? UpdateState.Available)?.info?.pageUrl ?: "https://redzikowski.com/portfolio/openclipflow"
-        events.tryEmit(UiEvent.OpenUrl(url))
-    }
 
     // ------------------------------------------------------------------ układy ekranu i tło
 

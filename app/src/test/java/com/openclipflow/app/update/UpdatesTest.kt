@@ -25,7 +25,7 @@ class UpdatesTest {
         """.trimIndent()
         val r = Updates.parseRelease(json)
         assertEquals("1.2.0", r.version)
-        assertEquals("Nowości\n- napisy", r.notes)
+        assertEquals("", r.notes)
         assertEquals("https://dl/apk", r.assetUrl)
         assertEquals(123L, r.sizeBytes)
     }

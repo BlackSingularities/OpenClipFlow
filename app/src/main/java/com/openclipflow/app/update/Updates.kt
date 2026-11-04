@@ -45,10 +45,10 @@ object Updates {
         if (url.isEmpty()) error("Wydanie nie zawiera pliku APK")
         return ReleaseInfo(
             version = o.str("tag_name").removePrefix("v"),
-            notes = o.str("body").substringBefore("\n---").trim(),
+            notes = "",
             assetUrl = url,
             sizeBytes = size,
-            pageUrl = o.str("html_url"),
+            pageUrl = "",
         )
     }
 

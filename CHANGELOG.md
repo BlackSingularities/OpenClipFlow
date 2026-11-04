@@ -1,3 +1,7 @@
+## 1.2.5
+
+- Komunikat o nowej wersji bez listy zmian, linków i informacji, skąd pobierana jest aktualizacja.
+
 ## 1.2.2
 
 ## 1.2.4

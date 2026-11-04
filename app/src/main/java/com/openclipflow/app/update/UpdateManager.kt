@@ -108,7 +108,7 @@ object UpdateManager {
         val b = (if (installed.hasMultipleSigners()) installed.apkContentsSigners else installed.signingCertificateHistory).map { it.toCharsString() }.toSet()
         if (a.intersect(b).isEmpty()) {
             apk.delete()
-            error("Podpis nowej wersji różni się od zainstalowanej – odinstaluj aplikację i zainstaluj APK z GitHuba ręcznie")
+            error("Podpis nowej wersji różni się od zainstalowanej – odinstaluj aplikację i zainstaluj nową wersję ręcznie")
         }
     }
 
