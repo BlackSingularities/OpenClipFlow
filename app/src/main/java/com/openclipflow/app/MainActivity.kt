@@ -1,5 +1,7 @@
 package com.openclipflow.app
 
+import com.openclipflow.app.feedback.Feedback
+import com.openclipflow.app.feedback.CrashReportPrompt
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -48,6 +50,7 @@ class MainActivity : ComponentActivity(), PlatformActions {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        Feedback.install(this, "openclipflow")
         if (Build.VERSION.SDK_INT >= 28) {
             window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
         }
@@ -55,6 +58,7 @@ class MainActivity : ComponentActivity(), PlatformActions {
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             OpenClipFlowTheme {
+                CrashReportPrompt()
                 LaunchedEffect(Unit) { vm.events.collect(::onEvent) }
                 BackHandler(enabled = vm.screen == Screen.EDITOR) {
                     when {
