@@ -1,5 +1,13 @@
 # OpenClipFlow
 
+<!-- posters:start -->
+<p align="center">
+  <img src="docs/posters/android.png" alt="OpenClipFlow – Android" width="460">
+</p>
+
+<p align="center"><a href="https://redzikowski.com/portfolio/openclipflow">redzikowski.com/portfolio/openclipflow</a></p>
+<!-- posters:end -->
+
 Edytor wideo na Androida (10+) w Kotlinie i Jetpack Compose, z silnikiem **Media3 Transformer**. Interfejs w stylu [OpenPDF](https://github.com/BlackSingularities/OpenPDF): czarno-biały, z pigułkowymi przyciskami i panelami bocznymi.
 
 ## Możliwości

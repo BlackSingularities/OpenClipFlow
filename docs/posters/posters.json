@@ -1,0 +1,22 @@
+{
+  "slug": "openclipflow",
+  "name": "OpenClipFlow",
+  "label": "montaż wideo na telefonie",
+  "icon": "icon.png",
+  "url": "https://redzikowski.com/portfolio/openclipflow",
+  "posters": [
+    {
+      "platform": "android",
+      "file": "android.png",
+      "title": "Montaż filmu *bez komputera*",
+      "lead": "Kilka ścieżek wideo, dźwięku i napisów, przejścia między ujęciami, lektor z mikrofonu i eksport do 4K w 60 klatkach.",
+      "shots": [
+        { "src": "../screenshots/android/03-projekty.png", "caption": "Projekty" },
+        { "src": "../screenshots/android/01-montaz.png", "caption": "Oś czasu" },
+        { "src": "../screenshots/android/02-eksport.png", "caption": "Eksport" }
+      ],
+      "features": ["wiele ścieżek", "przejścia i układy ujęć", "napisy z animacją", "lektor i stop-klatka", "H.264 i H.265 do 4K", "formaty 16:9 i 9:16"],
+      "meta": "Android 10 lub nowszy"
+    }
+  ]
+}
